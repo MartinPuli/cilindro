@@ -3,43 +3,26 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { SECTORS, PITCH_CENTER, fmtPrice } from './sectors.js';
+import { AREAS, PITCH_CENTER, fmtPrice, areaFromAngle } from './areas.js';
 
-/* ============================================================
-   Constantes de escena
-   ============================================================ */
-const STADIUM_CENTER = new THREE.Vector3(3.8, 8, 3.6);
-const OVERVIEW_POS = new THREE.Vector3(168, 118, 196);
+/* ============================================================ Escena ======= */
+const STADIUM_CENTER = new THREE.Vector3(3.8, 7, 3.6);
+const PITCH = new THREE.Vector3(PITCH_CENTER.x, PITCH_CENTER.y, PITCH_CENTER.z);
+const OVERVIEW_POS = new THREE.Vector3(150, 108, 178);
 const MODEL_URL = './models/RACING_3D.glb';
 
-/* ============================================================
-   Renderer
-   ============================================================ */
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({
-  canvas,
-  antialias: true,
-  powerPreference: 'high-performance',
-});
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-/* ============================================================
-   Escena, cámara, controles
-   ============================================================ */
 const scene = new THREE.Scene();
-
-const camera = new THREE.PerspectiveCamera(
-  46,
-  window.innerWidth / window.innerHeight,
-  0.5,
-  4000
-);
+const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.4, 4000);
 camera.position.copy(OVERVIEW_POS);
 camera.lookAt(STADIUM_CENTER);
 
@@ -47,397 +30,393 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.target.copy(STADIUM_CENTER);
-controls.minDistance = 60;
-controls.maxDistance = 620;
-controls.maxPolarAngle = Math.PI * 0.495; // no bajar del horizonte
-controls.rotateSpeed = 0.7;
+controls.minDistance = 42;
+controls.maxDistance = 430;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.rotateSpeed = 0.62;
 controls.zoomSpeed = 0.9;
+controls.enablePan = false;
 
-/* ============================================================
-   Cielo (fondo degradado) + niebla + entorno PBR
-   ============================================================ */
-function makeSkyTexture(top, mid, bottom) {
+/* ============================================================ Cielo/Env ==== */
+function makeSky(top, mid, bottom) {
   const c = document.createElement('canvas');
-  c.width = 8;
-  c.height = 512;
-  const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0, top);
-  g.addColorStop(0.55, mid);
-  g.addColorStop(1, bottom);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, 8, 512);
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  c.width = 8; c.height = 512;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 512);
+  g.addColorStop(0, top); g.addColorStop(0.55, mid); g.addColorStop(1, bottom);
+  x.fillStyle = g; x.fillRect(0, 0, 8, 512);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 }
-
-const SKY = {
-  day: makeSkyTexture('#4ea3e0', '#a9d7f2', '#e8f4fb'),
-  night: makeSkyTexture('#050c1a', '#0b1c33', '#16324d'),
-};
+const SKY = { day: makeSky('#4ea3e0', '#a9d7f2', '#e8f4fb'), night: makeSky('#050c1a', '#0b1c33', '#16324d') };
 scene.background = SKY.day;
-scene.fog = new THREE.Fog(0xcfe6f5, 260, 720);
+scene.fog = new THREE.Fog(0xcfe6f5, 320, 620);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.42;
+scene.environmentIntensity = 0.4;
 
-/* ============================================================
-   Luces
-   ============================================================ */
-const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x40503f, 1.0);
+/* Suelo (el barrio se quitó del modelo) */
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x2f4a34, roughness: 1, metalness: 0 });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(430, 64), groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = -0.02;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* ============================================================ Luces ======== */
+const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x45543f, 0.85);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff2df, 2.7);
-sun.position.set(120, 160, 80);
+const sun = new THREE.DirectionalLight(0xfff4e2, 2.5);
+sun.position.set(115, 155, 70);
 sun.target.position.copy(STADIUM_CENTER);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 40;
-sun.shadow.camera.far = 520;
-sun.shadow.camera.left = -150;
-sun.shadow.camera.right = 150;
-sun.shadow.camera.top = 150;
-sun.shadow.camera.bottom = -150;
+sun.shadow.camera.far = 480;
+sun.shadow.camera.left = -140; sun.shadow.camera.right = 140;
+sun.shadow.camera.top = 140; sun.shadow.camera.bottom = -140;
 sun.shadow.bias = -0.0004;
 sun.shadow.normalBias = 0.6;
-scene.add(sun);
-scene.add(sun.target);
+scene.add(sun, sun.target);
 
-// Reflectores del Cilindro (encienden de noche)
 const floodGroup = new THREE.Group();
 scene.add(floodGroup);
-const FLOOD_COUNT = 6;
-const FLOOD_R = 74;
-const FLOOD_H = 26;
-for (let i = 0; i < FLOOD_COUNT; i++) {
-  const a = (i / FLOOD_COUNT) * Math.PI * 2 + Math.PI / 6;
-  const sp = new THREE.SpotLight(0xeaf3ff, 0, 320, Math.PI / 5, 0.4, 1.2);
-  sp.position.set(
-    PITCH_CENTER.x + Math.cos(a) * FLOOD_R,
-    FLOOD_H,
-    PITCH_CENTER.z + Math.sin(a) * FLOOD_R
-  );
+for (let i = 0; i < 6; i++) {
+  const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+  const sp = new THREE.SpotLight(0xeaf3ff, 0, 340, Math.PI / 5, 0.4, 1.2);
+  sp.position.set(PITCH.x + Math.cos(a) * 74, 26, PITCH.z + Math.sin(a) * 74);
   const tgt = new THREE.Object3D();
-  tgt.position.set(PITCH_CENTER.x, 0, PITCH_CENTER.z);
+  tgt.position.set(PITCH.x, 0, PITCH.z);
   scene.add(tgt);
   sp.target = tgt;
   floodGroup.add(sp);
 }
 
-/* ============================================================
-   Estados de iluminación día / noche
-   ============================================================ */
 let isNight = false;
 function applyDayNight(night) {
   isNight = night;
   if (night) {
-    scene.background = SKY.night;
-    scene.fog.color.set(0x0b1c33);
-    scene.environmentIntensity = 0.16;
-    hemi.color.set(0x2c4a6e);
-    hemi.groundColor.set(0x0a1420);
-    hemi.intensity = 0.4;
-    sun.color.set(0x8fb4e8);
-    sun.intensity = 0.3;
+    scene.background = SKY.night; scene.fog.color.set(0x0b1c33); scene.environmentIntensity = 0.16;
+    hemi.color.set(0x2c4a6e); hemi.groundColor.set(0x0a1420); hemi.intensity = 0.4;
+    sun.color.set(0x8fb4e8); sun.intensity = 0.3;
+    groundMat.color.set(0x101c18);
     renderer.toneMappingExposure = 1.12;
-    floodGroup.children.forEach((f) => (f.intensity = 850));
+    floodGroup.children.forEach((f) => (f.intensity = 900));
   } else {
-    scene.background = SKY.day;
-    scene.fog.color.set(0xcfe6f5);
-    scene.environmentIntensity = 0.42;
-    hemi.color.set(0xbfe3ff);
-    hemi.groundColor.set(0x45543f);
-    hemi.intensity = 0.85;
-    sun.color.set(0xfff4e2);
-    sun.intensity = 2.4;
-    renderer.toneMappingExposure = 0.98;
+    scene.background = SKY.day; scene.fog.color.set(0xcfe6f5); scene.environmentIntensity = 0.4;
+    hemi.color.set(0xbfe3ff); hemi.groundColor.set(0x45543f); hemi.intensity = 0.85;
+    sun.color.set(0xfff4e2); sun.intensity = 2.5;
+    groundMat.color.set(0x2f4a34);
+    renderer.toneMappingExposure = 1.0;
     floodGroup.children.forEach((f) => (f.intensity = 0));
   }
 }
 
-/* ============================================================
-   Carga del modelo
-   ============================================================ */
+/* ============================================================ Marcador ===== */
+const marker = new THREE.Group();
+{
+  const ringGeo = new THREE.TorusGeometry(1.05, 0.18, 10, 28);
+  const ringMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ec, emissive: 0x2f9fe0, emissiveIntensity: 1.4, roughness: 0.4 });
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.rotation.x = Math.PI / 2;
+  const pinGeo = new THREE.ConeGeometry(0.5, 1.6, 16);
+  const pin = new THREE.Mesh(pinGeo, ringMat);
+  pin.position.y = 1.7;
+  pin.rotation.x = Math.PI;
+  marker.add(ring, pin);
+}
+marker.visible = false;
+scene.add(marker);
+
+/* ============================================================ Carga ======== */
 const loaderEl = document.getElementById('loader');
 const fillEl = document.getElementById('loader-fill');
 const pctEl = document.getElementById('loader-pct');
-
-// El modelo exporta varios materiales del estadio sin color base (césped,
-// hormigón, asientos): sin este mapa saldrían blancos. Los pintamos con la
-// paleta real de El Cilindro.
-const MATERIAL_TINT = {
-  BLK_STADIUM_TURF: 0x3f8036, // césped
-  BLK_STADIUM_CONCRETE: 0xb8b4a9, // hormigón bandejas
-  BLK_STADIUM_TERR_STRIPE: 0x808b92, // franjas de las bandejas
-  BLK_STADIUM_SEATS_PRIMARY: 0x2f9fe0, // asientos celestes (Racing)
-  BLK_STADIUM_SEATS_SECONDARY: 0xeef4f8, // asientos blancos
-  BLK_STADIUM_LINE: 0xf4f8ff, // líneas de la cancha
-};
+let modelRoot = null;
+const raycastTargets = [];
 
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
-
 gltfLoader.load(
   MODEL_URL,
   (gltf) => {
-    const model = gltf.scene;
-    const tinted = new Set();
-    model.traverse((o) => {
+    modelRoot = gltf.scene;
+    modelRoot.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
       o.receiveShadow = true;
       const mat = o.material;
-      if (!mat) return;
-      mat.side = THREE.FrontSide;
-      if (mat.map) mat.map.anisotropy = 4;
-
-      // El facade exterior comparte material con los asientos: lo dejamos gris.
-      if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' && /Exterior/.test(o.name)) {
-        o.material = mat.clone();
-        o.material.color.setHex(0xd8d5cc);
-        return;
+      if (mat) {
+        mat.side = THREE.FrontSide;
+        // rayado del corte de césped: la mitad alterna, un verde más oscuro
+        if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
+          o.material = mat.clone();
+          o.material.color.multiplyScalar(0.82);
+        }
       }
-      // Césped alternado: clonamos para dibujar el rayado del corte.
-      if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
-        o.material = mat.clone();
-        o.material.color.setHex(0x357030);
-        return;
-      }
-      if (MATERIAL_TINT[mat.name] !== undefined && !tinted.has(mat.uuid)) {
-        mat.color.setHex(MATERIAL_TINT[mat.name]);
-        tinted.add(mat.uuid);
-      }
+      raycastTargets.push(o);
     });
-    scene.add(model);
-    onModelReady();
+    scene.add(modelRoot);
+    onReady();
   },
-  (evt) => {
-    if (evt.lengthComputable || evt.total) {
-      const pct = Math.min(100, Math.round((evt.loaded / (evt.total || evt.loaded)) * 100));
-      fillEl.style.width = pct + '%';
-      pctEl.textContent = `Cargando el estadio… ${pct}%`;
+  (e) => {
+    if (e.total) {
+      const p = Math.min(100, Math.round((e.loaded / e.total) * 100));
+      fillEl.style.width = p + '%';
+      pctEl.textContent = `Cargando el estadio… ${p}%`;
     }
   },
-  (err) => {
-    console.error(err);
-    pctEl.textContent = 'No se pudo cargar el modelo 😞';
-  }
+  (err) => { console.error(err); pctEl.textContent = 'No se pudo cargar el modelo 😞'; }
 );
 
-function onModelReady() {
+function onReady() {
   applyDayNight(false);
   loaderEl.classList.add('done');
   setTimeout(() => (loaderEl.style.display = 'none'), 800);
-  // Aparecer UI
-  document.querySelectorAll('.hidden-on-load').forEach((el, i) => {
-    setTimeout(() => {
-      el.classList.remove('hidden-on-load');
-      el.classList.add('fade-in');
-    }, 250 + i * 90);
-  });
-  buildSectorChips();
-  // Intro: pequeño giro de bienvenida
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.6;
-  setTimeout(() => {
-    if (mode === 'overview' && !userRotateOn) controls.autoRotate = false;
-  }, 4200);
+  document.querySelectorAll('.hidden-on-load').forEach((el, i) =>
+    setTimeout(() => { el.classList.remove('hidden-on-load'); el.classList.add('fade-in'); }, 220 + i * 80)
+  );
+  renderOverview();
+  controls.autoRotate = true; controls.autoRotateSpeed = 0.55;
+  setTimeout(() => { if (mode === 'overview' && !userRotate) controls.autoRotate = false; }, 4200);
 }
 
-/* ============================================================
-   Modos de cámara: overview <-> seat
-   ============================================================ */
-let mode = 'overview';
-let userRotateOn = false;
+/* ============================================================ Modos ========= */
+let mode = 'overview'; // overview | area | seat | transition
+let userRotate = false;
+let activeArea = null;
+let pendingSeat = null; // {point, area, fila, butaca, price, kind}
 
-// Tween de cámara
+const currentLook = new THREE.Vector3().copy(STADIUM_CENTER);
 let tween = null;
-function easeInOut(t) {
-  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-}
+const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 function startTween({ toPos, toLook, toFov, duration = 1250, onDone }) {
   tween = {
-    fromPos: camera.position.clone(),
-    toPos: toPos.clone(),
-    fromLook: currentLook.clone(),
-    toLook: toLook.clone(),
-    fromFov: camera.fov,
-    toFov: toFov ?? camera.fov,
-    t: 0,
-    duration,
-    onDone,
+    fromPos: camera.position.clone(), toPos: toPos.clone(),
+    fromLook: currentLook.clone(), toLook: toLook.clone(),
+    fromFov: camera.fov, toFov: toFov ?? camera.fov,
+    t: 0, duration, onDone,
   };
 }
 
-// Punto que la cámara está mirando actualmente (se mantiene sincronizado)
-const currentLook = new THREE.Vector3().copy(STADIUM_CENTER);
-
-// Look de primera persona (modo butaca)
 const seatYawPitch = { yaw: 0, pitch: 0 };
-let activeSeat = null;
 
-function enterSeat(sector) {
-  activeSeat = sector;
-  mode = 'transition';
-  controls.autoRotate = false;
-  controls.enabled = false;
-  const toPos = new THREE.Vector3(sector.pos.x, sector.pos.y, sector.pos.z);
-  const toLook = new THREE.Vector3(sector.aim.x, sector.aim.y, sector.aim.z);
+function goOverview() {
+  mode = 'transition'; activeArea = null; pendingSeat = null; marker.visible = false;
+  controls.enabled = false; controls.autoRotate = false;
   startTween({
-    toPos,
-    toLook,
-    toFov: sector.fov,
-    duration: 1400,
+    toPos: OVERVIEW_POS.clone(), toLook: STADIUM_CENTER.clone(), toFov: 46, duration: 1250,
+    onDone: () => {
+      mode = 'overview'; controls.target.copy(STADIUM_CENTER); controls.enabled = true;
+      controls.minDistance = 42; controls.maxDistance = 430;
+      controls.autoRotate = userRotate;
+    },
+  });
+  setModeTag('Vista aérea');
+  hideBack();
+  renderOverview();
+}
+
+function goArea(area) {
+  mode = 'transition'; activeArea = area; pendingSeat = null; marker.visible = false;
+  controls.enabled = false; controls.autoRotate = false;
+  const toPos = new THREE.Vector3(area.view.pos.x, area.view.pos.y, area.view.pos.z);
+  const toLook = new THREE.Vector3(area.view.look.x, area.view.look.y, area.view.look.z);
+  startTween({
+    toPos, toLook, toFov: area.view.fov, duration: 1300,
+    onDone: () => {
+      mode = 'area'; controls.target.copy(toLook); controls.enabled = true;
+      controls.minDistance = 20; controls.maxDistance = 150;
+    },
+  });
+  setModeTag(area.name);
+  showBack('Sectores');
+  renderArea(area);
+}
+
+function goSeat(seat) {
+  mode = 'transition'; pendingSeat = seat; marker.visible = false;
+  controls.enabled = false; controls.autoRotate = false;
+  const eye = seat.point.clone().add(new THREE.Vector3(0, 1.35, 0));
+  // un pasito hacia la cancha para no quedar dentro de la butaca
+  const toC = PITCH.clone().sub(eye); toC.y = 0; toC.normalize();
+  eye.add(toC.multiplyScalar(0.6));
+  const look = PITCH.clone();
+  startTween({
+    toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
     onDone: () => {
       mode = 'seat';
-      // inicializar yaw/pitch desde la dirección actual
-      const dir = toLook.clone().sub(toPos).normalize();
+      const dir = look.clone().sub(eye).normalize();
       seatYawPitch.yaw = Math.atan2(dir.x, dir.z);
       seatYawPitch.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
     },
   });
-  showSeatCard(sector);
-  setModeTag(sector.name);
-  document.getElementById('sector-dock').classList.add('hidden');
-  document.getElementById('hint-text').textContent =
-    'Arrastrá para mirar alrededor · Rueda para acercar';
+  setModeTag(seat.area.name);
+  showBack('Elegir otra');
+  renderSeat(seat);
 }
 
-function exitToOverview() {
-  activeSeat = null;
-  mode = 'transition';
-  controls.enabled = false;
-  startTween({
-    toPos: OVERVIEW_POS.clone(),
-    toLook: STADIUM_CENTER.clone(),
-    toFov: 46,
-    duration: 1300,
-    onDone: () => {
-      mode = 'overview';
-      controls.target.copy(STADIUM_CENTER);
-      controls.enabled = true;
-      controls.autoRotate = userRotateOn;
-    },
-  });
-  hideSeatCard();
-  setModeTag('Vista aérea');
-  document.getElementById('sector-dock').classList.remove('hidden');
-  document.getElementById('hint-text').textContent =
-    'Arrastrá para girar · Rueda para acercar';
+/* ============================================================ Picking ======= */
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+function pickSeat(clientX, clientY) {
+  if (!modelRoot) return;
+  ndc.x = (clientX / window.innerWidth) * 2 - 1;
+  ndc.y = -(clientY / window.innerHeight) * 2 + 1;
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects(raycastTargets, false);
+  for (const h of hits) {
+    const p = h.point;
+    const r = Math.hypot(p.x - PITCH.x, p.z - PITCH.z);
+    if (r < 34 || r > 100 || p.y < 1.2 || p.y > 20) continue; // debe ser una tribuna (no techo)
+    const angle = Math.atan2(p.z - PITCH.z, p.x - PITCH.x);
+    const area = areaFromAngle(angle);
+    const fila = THREE.MathUtils.clamp(Math.round((p.y - 1.6) / 0.42) + 1, 1, 58);
+    const isPop = area.kind === 'popular';
+    const butaca = isPop ? 'Gral.' : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214);
+    let price = area.priceFrom;
+    if (!isPop) price = area.priceFrom * (1 + Math.max(0, 18 - fila) * 0.02);
+    pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind };
+    marker.position.copy(p);
+    marker.visible = true;
+    renderArea(activeArea, pendingSeat);
+    return;
+  }
 }
 
-/* ============================================================
-   Controles de "mirar" en modo butaca
-   ============================================================ */
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
+/* ============================================================ Puntero ======= */
+let downX = 0, downY = 0, downT = 0, dragging = false, moved = 0;
 const LOOK_SENS = 0.0028;
-
-renderer.domElement.addEventListener('pointerdown', (e) => {
+canvas.addEventListener('pointerdown', (e) => {
+  downX = e.clientX; downY = e.clientY; moved = 0; dragging = true;
+  if (mode === 'seat') canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
+  if (mode === 'seat') {
+    const dx = e.movementX || 0, dy = e.movementY || 0;
+    seatYawPitch.yaw -= dx * LOOK_SENS;
+    seatYawPitch.pitch = THREE.MathUtils.clamp(seatYawPitch.pitch + dy * LOOK_SENS, -0.7, 0.5);
+  }
+});
+canvas.addEventListener('pointerup', (e) => {
+  dragging = false;
+  if (mode === 'area' && moved < 7) pickSeat(e.clientX, e.clientY);
+});
+canvas.addEventListener('pointercancel', () => (dragging = false));
+canvas.addEventListener('wheel', (e) => {
   if (mode !== 'seat') return;
-  dragging = true;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  renderer.domElement.setPointerCapture(e.pointerId);
-});
-renderer.domElement.addEventListener('pointermove', (e) => {
-  if (mode !== 'seat' || !dragging) return;
-  const dx = e.clientX - lastX;
-  const dy = e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  seatYawPitch.yaw -= dx * LOOK_SENS;
-  seatYawPitch.pitch = THREE.MathUtils.clamp(
-    seatYawPitch.pitch + dy * LOOK_SENS,
-    -0.7,
-    0.55
+  e.preventDefault();
+  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 22, 74);
+  camera.updateProjectionMatrix();
+}, { passive: false });
+
+/* ============================================================ UI ============ */
+const sheet = document.getElementById('sheet');
+const sheetContent = document.getElementById('sheet-content');
+const backbtn = document.getElementById('backbtn');
+const backText = document.getElementById('backbtn-text');
+function showBack(t) { backText.textContent = t; backbtn.classList.remove('hidden'); }
+function hideBack() { backbtn.classList.add('hidden'); }
+function setModeTag(t) { document.getElementById('mode-tag').textContent = t; }
+
+function renderOverview() {
+  const cards = AREAS.map((a) => `
+    <button class="area-card" data-area="${a.id}">
+      <span class="area-swatch" style="background:${a.color}"></span>
+      <span class="area-info">
+        <span class="area-name">${a.name}</span>
+        <span class="area-meta">${a.tier} · desde ${fmtPrice(a.priceFrom)}</span>
+      </span>
+    </button>`).join('');
+  sheetContent.innerHTML = `
+    <div class="sheet-kicker">Paso 1 de 2</div>
+    <div class="sheet-title">Elegí tu sector</div>
+    <div class="sheet-sub">Tocá una tribuna del Cilindro para acercarte y elegir tu butaca.</div>
+    <div class="area-grid">${cards}</div>`;
+  sheetContent.querySelectorAll('.area-card').forEach((el) =>
+    el.addEventListener('click', () => goArea(AREAS.find((a) => a.id === el.dataset.area)))
   );
-});
-renderer.domElement.addEventListener('pointerup', () => (dragging = false));
-renderer.domElement.addEventListener('pointercancel', () => (dragging = false));
+}
 
-// Zoom (FOV) en modo butaca
-renderer.domElement.addEventListener(
-  'wheel',
-  (e) => {
-    if (mode !== 'seat') return;
-    e.preventDefault();
-    camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 22, 74);
-    camera.updateProjectionMatrix();
-  },
-  { passive: false }
-);
-
-/* ============================================================
-   UI
-   ============================================================ */
-function buildSectorChips() {
-  const dock = document.getElementById('dock-chips');
-  dock.innerHTML = '';
-  SECTORS.forEach((s) => {
-    const chip = document.createElement('button');
-    chip.className = 'chip';
-    chip.innerHTML = `
-      <span class="chip-dot" style="color:${s.color};background:${s.color}"></span>
-      <span>${s.name}</span>
-      <span class="chip-price">${fmtPrice(s.price)}</span>`;
-    chip.addEventListener('click', () => enterSeat(s));
-    dock.appendChild(chip);
+function renderArea(area, seat) {
+  if (!seat) {
+    sheetContent.innerHTML = `
+      <div class="sheet-kicker">Paso 2 de 2 · ${area.name}</div>
+      <div class="sheet-title">Tocá tu ${area.kind === 'popular' ? 'lugar' : 'butaca'}</div>
+      <div class="pick-row">
+        <span class="pick-pulse"></span>
+        <span class="pick-text">Tocá sobre la tribuna para elegir dónde te querés sentar. Arrastrá para mirar mejor.</span>
+      </div>`;
+    return;
+  }
+  const seatLabel = seat.kind === 'popular'
+    ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`
+    : `<div class="meta-item"><span class="meta-k">Butaca</span><span class="meta-v">${seat.butaca}</span></div>`;
+  sheetContent.innerHTML = `
+    <div class="seat-head">
+      <span class="seat-accent" style="background:${area.color};color:${area.color}"></span>
+      <span><span class="seat-name">${area.name}</span><span class="seat-tier">${area.tier}</span></span>
+    </div>
+    <div class="seat-meta">
+      <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
+      ${seatLabel}
+      <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
+    </div>
+    <div class="row-actions">
+      <button class="btn btn-ghost" id="re-pick">Otro lugar</button>
+      <button class="btn btn-primary" id="go-view">Ver desde acá</button>
+    </div>`;
+  sheetContent.querySelector('#go-view').addEventListener('click', () => goSeat(pendingSeat));
+  sheetContent.querySelector('#re-pick').addEventListener('click', () => {
+    pendingSeat = null; marker.visible = false; renderArea(area);
   });
 }
 
-const seatCard = document.getElementById('seat-card');
-function showSeatCard(s) {
-  document.getElementById('seat-accent').style.background = s.color;
-  document.getElementById('seat-accent').style.color = s.color;
-  document.getElementById('seat-sector').textContent = s.name;
-  document.getElementById('seat-tier').textContent = s.tier;
-  document.getElementById('seat-row').textContent = s.row;
-  document.getElementById('seat-num').textContent = s.seat === 0 ? 'Gral.' : s.seat;
-  document.getElementById('seat-price').textContent = fmtPrice(s.price);
-  document.getElementById('seat-desc').textContent = s.desc;
-  seatCard.classList.remove('hidden');
-  requestAnimationFrame(() => seatCard.classList.add('show'));
-}
-function hideSeatCard() {
-  seatCard.classList.remove('show');
-  setTimeout(() => seatCard.classList.add('hidden'), 400);
+function renderSeat(seat) {
+  const a = seat.area;
+  const seatLabel = seat.kind === 'popular'
+    ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`
+    : `<div class="meta-item"><span class="meta-k">Butaca</span><span class="meta-v">${seat.butaca}</span></div>`;
+  sheetContent.innerHTML = `
+    <div class="seat-head">
+      <span class="seat-accent" style="background:${a.color};color:${a.color}"></span>
+      <span><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
+    </div>
+    <div class="seat-meta">
+      <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
+      ${seatLabel}
+      <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
+    </div>
+    <div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda para acercar.</b></div>
+    <div class="row-actions">
+      <button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>
+      <button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>
+    </div>`;
+  sheetContent.querySelector('#seat-change').addEventListener('click', () => goArea(a));
+  sheetContent.querySelector('#seat-grab').addEventListener('click', () => toast(`¡Lugar en ${a.name} reservado! 🔵⚪`));
 }
 
-function setModeTag(text) {
-  document.getElementById('mode-tag').textContent = text;
-}
+backbtn.addEventListener('click', () => {
+  if (mode === 'seat') goArea(activeArea);
+  else goOverview();
+});
 
-// Toast
 let toastEl = null;
 function toast(msg) {
-  if (!toastEl) {
-    toastEl = document.createElement('div');
-    toastEl.id = 'toast';
-    document.body.appendChild(toastEl);
-  }
-  toastEl.textContent = msg;
-  toastEl.classList.add('show');
-  clearTimeout(toastEl._t);
-  toastEl._t = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  if (!toastEl) { toastEl = document.createElement('div'); toastEl.id = 'toast'; document.body.appendChild(toastEl); }
+  toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastEl._t); toastEl._t = setTimeout(() => toastEl.classList.remove('show'), 2600);
 }
-
-// Botones
-document.getElementById('btn-back').addEventListener('click', exitToOverview);
-document.getElementById('btn-grab').addEventListener('click', () => {
-  if (activeSeat) toast(`¡${activeSeat.name} reservada! 🔵⚪ (demo)`);
-});
 
 const btnRotate = document.getElementById('btn-rotate');
 btnRotate.addEventListener('click', () => {
-  userRotateOn = !userRotateOn;
-  btnRotate.classList.toggle('active', userRotateOn);
-  if (mode === 'overview') controls.autoRotate = userRotateOn;
+  userRotate = !userRotate;
+  btnRotate.classList.toggle('active', userRotate);
+  if (mode === 'overview') controls.autoRotate = userRotate;
 });
-
 const btnDayNight = document.getElementById('btn-daynight');
 btnDayNight.addEventListener('click', () => {
   applyDayNight(!isNight);
@@ -445,22 +424,24 @@ btnDayNight.addEventListener('click', () => {
   btnDayNight.classList.toggle('active', isNight);
 });
 
-/* ============================================================
-   Resize
-   ============================================================ */
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-/* ============================================================
-   Loop de render
-   ============================================================ */
+/* ============================================================ Loop ========== */
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
+  const t = clock.elapsedTime;
+
+  if (marker.visible) {
+    marker.rotation.y = t * 1.2;
+    const s = 1 + Math.sin(t * 3) * 0.08;
+    marker.scale.setScalar(s);
+  }
 
   if (tween) {
     tween.t += dt / (tween.duration / 1000);
@@ -470,21 +451,13 @@ function animate() {
     camera.fov = tween.fromFov + (tween.toFov - tween.fromFov) * k;
     camera.updateProjectionMatrix();
     camera.lookAt(currentLook);
-    if (tween.t >= 1) {
-      const done = tween.onDone;
-      tween = null;
-      if (done) done();
-    }
-  } else if (mode === 'overview') {
+    if (tween.t >= 1) { const d = tween.onDone; tween = null; if (d) d(); }
+  } else if (mode === 'overview' || mode === 'area') {
     controls.update();
     currentLook.copy(controls.target);
-  } else if (mode === 'seat' && activeSeat) {
+  } else if (mode === 'seat') {
     const cp = Math.cos(seatYawPitch.pitch);
-    const dir = new THREE.Vector3(
-      Math.sin(seatYawPitch.yaw) * cp,
-      Math.sin(seatYawPitch.pitch),
-      Math.cos(seatYawPitch.yaw) * cp
-    );
+    const dir = new THREE.Vector3(Math.sin(seatYawPitch.yaw) * cp, Math.sin(seatYawPitch.pitch), Math.cos(seatYawPitch.yaw) * cp);
     currentLook.copy(camera.position).add(dir);
     camera.lookAt(currentLook);
   }

@@ -2,29 +2,32 @@
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#0a1a2f" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>El Cilindro · Racing Club — Visor 3D</title>
     <meta
       name="description"
-      content="Recorré el Estadio Presidente Perón (El Cilindro) de Racing Club en 3D y mirá la cancha desde cada tribuna."
+      content="Recorré El Cilindro de Racing Club en 3D. Elegí tu sector y tu butaca y mirá cómo se ve la cancha desde tu lugar."
     />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%2358bff0'/%3E%3Cstop offset='1' stop-color='%231e88c7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='30' fill='url(%23g)' stroke='white' stroke-width='4'/%3E%3Ctext x='32' y='42' font-family='Arial,sans-serif' font-size='26' font-weight='bold' fill='white' text-anchor='middle'%3ERC%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%2370c5e8'/%3E%3Cstop offset='1' stop-color='%231e88c7'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='30' fill='url(%23g)' stroke='white' stroke-width='4'/%3E%3Ctext x='32' y='42' font-family='Arial,sans-serif' font-size='26' font-weight='bold' fill='white' text-anchor='middle'%3ERC%3C/text%3E%3C/svg%3E"
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
-    <!-- Canvas -->
     <canvas id="scene"></canvas>
 
-    <!-- Loading screen -->
+    <!-- Loading -->
     <div id="loader">
-      <div class="loader-crest">
-        <div class="crest">RC</div>
-      </div>
+      <div class="loader-crest"><div class="crest">RC</div></div>
       <div class="loader-title">EL CILINDRO</div>
       <div class="loader-sub">Estadio Presidente Perón · Avellaneda</div>
       <div class="loader-bar"><div class="loader-bar-fill" id="loader-fill"></div></div>
@@ -37,53 +40,30 @@
         <div class="crest crest-sm">RC</div>
         <div class="brand-text">
           <div class="brand-title">EL CILINDRO</div>
-          <div class="brand-sub">Racing Club · Vista 3D</div>
+          <div class="brand-sub">Racing Club · 3D</div>
         </div>
       </div>
       <div class="top-actions">
-        <button class="btn btn-icon" id="btn-rotate" title="Girar automáticamente">
+        <button class="btn btn-icon" id="btn-rotate" title="Girar solo" aria-label="Girar automáticamente">
           <span class="ico">360°</span>
         </button>
-        <button class="btn btn-icon" id="btn-daynight" title="Día / Noche">
+        <button class="btn btn-icon" id="btn-daynight" title="Día / Noche" aria-label="Día o noche">
           <span class="ico" id="daynight-ico">☀</span>
         </button>
       </div>
     </header>
 
-    <!-- Sector picker (overview mode) -->
-    <div id="sector-dock" class="ui hidden-on-load">
-      <div class="dock-label">Elegí tu ubicación</div>
-      <div class="dock-chips" id="dock-chips"></div>
-    </div>
+    <!-- Floating back button (area/seat modes) -->
+    <button id="backbtn" class="ui hidden">← <span id="backbtn-text">Volver</span></button>
 
-    <!-- Seat info card (seat mode) -->
-    <div id="seat-card" class="ui hidden">
-      <div class="seat-card-top">
-        <div class="seat-accent" id="seat-accent"></div>
-        <div class="seat-headings">
-          <div class="seat-sector" id="seat-sector">—</div>
-          <div class="seat-tier" id="seat-tier">—</div>
-        </div>
-      </div>
-      <div class="seat-meta">
-        <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v" id="seat-row">—</span></div>
-        <div class="meta-item"><span class="meta-k">Butaca</span><span class="meta-v" id="seat-num">—</span></div>
-        <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v" id="seat-price">—</span></div>
-      </div>
-      <div class="seat-desc" id="seat-desc"></div>
-      <div class="seat-actions">
-        <button class="btn btn-ghost" id="btn-back">← Volver al estadio</button>
-        <button class="btn btn-primary" id="btn-grab">Quiero esta ubicación</button>
-      </div>
-    </div>
-
-    <!-- Hint -->
-    <div id="hint" class="ui hidden-on-load">
-      <span id="hint-text">Arrastrá para girar · Rueda para acercar</span>
-    </div>
-
-    <!-- Compass / mode tag -->
+    <!-- Mode tag -->
     <div id="mode-tag" class="ui hidden-on-load">Vista aérea</div>
+
+    <!-- Bottom sheet: content is swapped per mode from main.js -->
+    <div id="sheet" class="ui hidden-on-load">
+      <div id="sheet-handle"></div>
+      <div id="sheet-content"></div>
+    </div>
 
     <script type="module" src="./src/main.js"></script>
   </body>
