@@ -22,9 +22,10 @@ responsive tipo _bottom sheet_ en el celular.
 
 ## 🏟️ Sectores (reales del Cilindro)
 
-Platea Belgrano (lateral Oeste) · Platea San Martín (lateral Este) · Popular Sur (local) ·
-Popular Norte (visitante) · Palcos Preferenciales (codo) · Platea Damas. Los precios, filas
-y butacas de la demo son ilustrativos (editables en `src/areas.js`).
+Popular Sur (local) · Popular Norte (visitante) · Platea A (lateral, preferencial) ·
+Platea B (lateral) · Platea C (codo) · Platea Damas — los nombres reales del mapa oficial
+de Racing (plateas por letra, no las de otros clubes). Los precios, filas y butacas de la
+demo son ilustrativos (editables en `src/areas.js`).
 
 ## 🎨 Colores reales del modelo
 
