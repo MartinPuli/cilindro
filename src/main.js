@@ -253,6 +253,14 @@ gltfLoader.load(
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x2ea3e0);
         // el Cilindro tiene techo celeste translúcido (en el modelo venía gris)
         if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x8ec4e2);
+        // el alambrado del perímetro y de las populares es TRANSPARENTE (se ve la
+        // cancha a través, como en la realidad)
+        if (mat.name === 'BLK_STADIUM_FENCE' || mat.name === 'BLK_STADIUM_BARRIER') {
+          mat.transparent = true;
+          mat.opacity = 0.12;
+          mat.depthWrite = false;
+          mat.color.setHex(0x2b3136);
+        }
         // rayado del corte de césped: la mitad alterna, un verde más oscuro
         if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
           o.material = mat.clone();
@@ -344,13 +352,12 @@ function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
   hideAreaHighlight();
   controls.enabled = false; controls.autoRotate = false;
-  // subimos el ojo (más en filas bajas) y damos un paso HACIA la cancha para
-  // mirar por encima del alambrado/perímetro y no quedar contra el hormigón
-  const low = Math.max(0, 8 - seat.point.y);
+  // altura natural de la butaca + un pasito hacia la cancha (el alambrado ya es
+  // transparente, así que no hace falta subir de más)
   const eye = seat.point.clone();
-  eye.y += 1.5 + low * 0.6;
+  eye.y += 1.4;
   const toC = PITCH.clone().sub(eye); toC.y = 0; toC.normalize();
-  eye.addScaledVector(toC, 1.4);
+  eye.addScaledVector(toC, 0.9);
   const look = PITCH.clone();
   startTween({
     toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
