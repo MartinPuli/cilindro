@@ -33,14 +33,19 @@ camera.lookAt(STADIUM_CENTER);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
-controls.dampingFactor = 0.06;
+controls.dampingFactor = 0.08;
 controls.target.copy(STADIUM_CENTER);
-controls.minDistance = 42;
-controls.maxDistance = 430;
-controls.maxPolarAngle = Math.PI * 0.495;
-controls.rotateSpeed = 0.62;
-controls.zoomSpeed = 0.9;
-controls.enablePan = false;
+controls.minDistance = 26;
+controls.maxDistance = 470;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.rotateSpeed = 0.95;
+controls.zoomSpeed = 1.1;
+controls.zoomToCursor = true;
+controls.enablePan = true;              // moverse por el estadio (2 dedos / botón derecho)
+controls.screenSpacePanning = true;
+controls.keyPanSpeed = 24;
+// cortar la autorrotación apenas el usuario toca
+controls.addEventListener('start', () => { if (mode === 'overview' && !userRotate) controls.autoRotate = false; });
 
 /* ============================================================ Cielo/Env ==== */
 function makeSky(top, mid, bottom) {
@@ -134,6 +139,35 @@ const marker = new THREE.Group();
 marker.visible = false;
 scene.add(marker);
 
+/* ====================================================== Resaltado de área == */
+// Cámara para encuadrar una tribuna (desde el campo, por debajo del techo,
+// mirando hacia la tribuna elegida — evita chocar con estructuras).
+function areaView(area) {
+  const dir = new THREE.Vector3(Math.cos(area.ang), 0, Math.sin(area.ang));
+  const look = new THREE.Vector3(PITCH.x, 9, PITCH.z).addScaledVector(dir, 60);
+  const pos = new THREE.Vector3(PITCH.x, 16.5, PITCH.z).addScaledVector(dir, 7);
+  const fov = area.kind === 'popular' ? 60 : 55;
+  return { pos, look, fov };
+}
+
+// Panel celeste translúcido que marca la tribuna seleccionada sobre el cuenco.
+let areaHL = null;
+function showAreaHighlight(area) {
+  if (areaHL) { scene.remove(areaHL); areaHL.geometry.dispose(); areaHL.material.dispose(); }
+  const thetaLen = area.kind === 'popular' ? 1.5 : 1.2;
+  const thetaCenter = Math.PI / 2 - area.ang; // ver convención CylinderGeometry
+  const geo = new THREE.CylinderGeometry(93, 50, 19, 40, 1, true, thetaCenter - thetaLen / 2, thetaLen);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xcdeeff, transparent: true, opacity: 0.4,
+    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  areaHL = new THREE.Mesh(geo, mat);
+  areaHL.position.set(PITCH.x, 10.5, PITCH.z);
+  areaHL.renderOrder = 2;
+  scene.add(areaHL);
+}
+function hideAreaHighlight() { if (areaHL) { scene.remove(areaHL); areaHL.geometry.dispose(); areaHL.material.dispose(); areaHL = null; } }
+
 /* ============================================================ Carga ======== */
 const loaderEl = document.getElementById('loader');
 const fillEl = document.getElementById('loader-fill');
@@ -154,6 +188,8 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
+        // celeste de Racing más fiel para los asientos (oficial ~#029CDC)
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x2ea3e0);
         // rayado del corte de césped: la mitad alterna, un verde más oscuro
         if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
           o.material = mat.clone();
@@ -209,6 +245,7 @@ const seatYawPitch = { yaw: 0, pitch: 0 };
 
 function goOverview() {
   mode = 'transition'; activeArea = null; pendingSeat = null; marker.visible = false;
+  hideAreaHighlight();
   controls.enabled = false; controls.autoRotate = false;
   startTween({
     toPos: OVERVIEW_POS.clone(), toLook: STADIUM_CENTER.clone(), toFov: 46, duration: 1250,
@@ -226,13 +263,13 @@ function goOverview() {
 function goArea(area) {
   mode = 'transition'; activeArea = area; pendingSeat = null; marker.visible = false;
   controls.enabled = false; controls.autoRotate = false;
-  const toPos = new THREE.Vector3(area.view.pos.x, area.view.pos.y, area.view.pos.z);
-  const toLook = new THREE.Vector3(area.view.look.x, area.view.look.y, area.view.look.z);
+  const v = areaView(area);
+  showAreaHighlight(area);
   startTween({
-    toPos, toLook, toFov: area.view.fov, duration: 1300,
+    toPos: v.pos, toLook: v.look, toFov: v.fov, duration: 1300,
     onDone: () => {
-      mode = 'area'; controls.target.copy(toLook); controls.enabled = true;
-      controls.minDistance = 20; controls.maxDistance = 150;
+      mode = 'area'; controls.target.copy(v.look); controls.enabled = true;
+      controls.minDistance = 22; controls.maxDistance = 135;
     },
   });
   setModeTag(area.name);
@@ -242,6 +279,7 @@ function goArea(area) {
 
 function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
+  hideAreaHighlight();
   controls.enabled = false; controls.autoRotate = false;
   const eye = seat.point.clone().add(new THREE.Vector3(0, 1.35, 0));
   // un pasito hacia la cancha para no quedar dentro de la butaca
@@ -266,17 +304,20 @@ function goSeat(seat) {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 function pickSeat(clientX, clientY) {
-  if (!modelRoot) return;
+  if (!modelRoot || !activeArea) return;
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
   const hits = raycaster.intersectObjects(raycastTargets, false);
+  let outOfArea = false;
   for (const h of hits) {
     const p = h.point;
     const r = Math.hypot(p.x - PITCH.x, p.z - PITCH.z);
     if (r < 34 || r > 100 || p.y < 1.2 || p.y > 20) continue; // debe ser una tribuna (no techo)
     const angle = Math.atan2(p.z - PITCH.z, p.x - PITCH.x);
-    const area = areaFromAngle(angle);
+    // cada butaca pertenece a un sector: solo se puede elegir dentro del activo
+    if (areaFromAngle(angle) !== activeArea) { outOfArea = true; continue; }
+    const area = activeArea;
     const fila = THREE.MathUtils.clamp(Math.round((p.y - 1.6) / 0.42) + 1, 1, 58);
     const isPop = area.kind === 'popular';
     const butaca = isPop ? 'Gral.' : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214);
@@ -288,6 +329,7 @@ function pickSeat(clientX, clientY) {
     renderArea(activeArea, pendingSeat);
     return;
   }
+  if (outOfArea) toast(`Esa butaca es de otro sector — tocá dentro de ${activeArea.name}.`);
 }
 
 /* ============================================================ Puntero ======= */
@@ -447,6 +489,7 @@ function animate() {
     const s = 1 + Math.sin(t * 3) * 0.08;
     marker.scale.setScalar(s);
   }
+  if (areaHL) areaHL.material.opacity = 0.28 + (Math.sin(t * 2.3) * 0.5 + 0.5) * 0.28;
 
   if (tween) {
     tween.t += dt / (tween.duration / 1000);
