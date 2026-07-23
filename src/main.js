@@ -219,8 +219,8 @@ function showAreaHighlight(area) {
   const thetaCenter = Math.PI / 2 - area.ang; // ver convención CylinderGeometry
   const geo = new THREE.CylinderGeometry(93, 50, 19, 40, 1, true, thetaCenter - thetaLen / 2, thetaLen);
   const mat = new THREE.MeshBasicMaterial({
-    color: 0xcdeeff, transparent: true, opacity: 0.4,
-    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+    color: 0xffd21a, transparent: true, opacity: 0.42, // amarillo: marca la tribuna elegida
+    side: THREE.DoubleSide, depthWrite: false,
   });
   areaHL = new THREE.Mesh(geo, mat);
   areaHL.position.set(PITCH.x, 10.5, PITCH.z);
@@ -344,10 +344,13 @@ function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
   hideAreaHighlight();
   controls.enabled = false; controls.autoRotate = false;
-  const eye = seat.point.clone().add(new THREE.Vector3(0, 1.35, 0));
-  // un pasito hacia la cancha para no quedar dentro de la butaca
+  // subimos el ojo (más en filas bajas) y damos un paso HACIA la cancha para
+  // mirar por encima del alambrado/perímetro y no quedar contra el hormigón
+  const low = Math.max(0, 8 - seat.point.y);
+  const eye = seat.point.clone();
+  eye.y += 1.5 + low * 0.6;
   const toC = PITCH.clone().sub(eye); toC.y = 0; toC.normalize();
-  eye.add(toC.multiplyScalar(0.6));
+  eye.addScaledVector(toC, 1.4);
   const look = PITCH.clone();
   startTween({
     toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
@@ -369,20 +372,23 @@ function goSeat(seat) {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 function pickSeat(clientX, clientY) {
-  if (!modelRoot || !activeArea) return;
+  if (!modelRoot) return;
   ndc.x = (clientX / window.innerWidth) * 2 - 1;
   ndc.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(ndc, camera);
   const hits = raycaster.intersectObjects(raycastTargets, false);
-  let outOfArea = false;
   for (const h of hits) {
     const p = h.point;
     const r = Math.hypot(p.x - PITCH.x, p.z - PITCH.z);
     if (r < 34 || r > 100 || p.y < 1.2 || p.y > 20) continue; // debe ser una tribuna (no techo)
     const angle = Math.atan2(p.z - PITCH.z, p.x - PITCH.x);
-    // cada butaca pertenece a un sector: solo se puede elegir dentro del activo
-    if (areaFromAngle(angle) !== activeArea) { outOfArea = true; continue; }
-    const area = activeArea;
+    const area = areaFromAngle(angle);
+    // si tocaste el lugar de otro sector, te cambia a ese sector
+    if (area !== activeArea) {
+      activeArea = area;
+      showAreaHighlight(area);
+      setModeTag(area.name);
+    }
     const fila = THREE.MathUtils.clamp(Math.round((p.y - 1.6) / 0.42) + 1, 1, 58);
     const isPop = area.kind === 'popular';
     const butaca = isPop ? 'Gral.' : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214);
@@ -391,10 +397,9 @@ function pickSeat(clientX, clientY) {
     pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind };
     marker.position.copy(p);
     marker.visible = true;
-    renderArea(activeArea, pendingSeat);
+    renderArea(area, pendingSeat);
     return;
   }
-  if (outOfArea) toast(`Esa butaca es de otro sector — tocá dentro de ${activeArea.name}.`);
 }
 
 /* ============================================================ Puntero ======= */
@@ -542,7 +547,7 @@ function animate() {
     const s = 1 + Math.sin(t * 3) * 0.08;
     marker.scale.setScalar(s);
   }
-  if (areaHL) areaHL.material.opacity = 0.28 + (Math.sin(t * 2.3) * 0.5 + 0.5) * 0.28;
+  if (areaHL) areaHL.material.opacity = 0.3 + (Math.sin(t * 2.3) * 0.5 + 0.5) * 0.2;
 
   if (tween) {
     tween.t += dt / (tween.duration / 1000);
