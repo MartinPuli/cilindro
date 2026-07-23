@@ -214,20 +214,37 @@ function areaView(area) {
 // Panel celeste translúcido que marca la tribuna seleccionada sobre el cuenco.
 let areaHL = null;
 function showAreaHighlight(area) {
-  if (areaHL) { scene.remove(areaHL); areaHL.geometry.dispose(); areaHL.material.dispose(); }
-  const thetaLen = area.kind === 'popular' ? 1.5 : 1.2;
-  const thetaCenter = Math.PI / 2 - area.ang; // ver convención CylinderGeometry
-  const geo = new THREE.CylinderGeometry(93, 50, 19, 40, 1, true, thetaCenter - thetaLen / 2, thetaLen);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xffd21a, transparent: true, opacity: 0.42, // amarillo: marca la tribuna elegida
+  hideAreaHighlight();
+  const thetaLen = area.kind === 'popular' ? 1.55 : 1.2;
+  const thetaStart = (Math.PI / 2 - area.ang) - thetaLen / 2; // convención CylinderGeometry
+  const g = new THREE.Group();
+  // glow amarillo suave sobre la tribuna (no tapa los asientos)
+  const fillMat = new THREE.MeshBasicMaterial({
+    color: 0xffcf3a, transparent: true, opacity: 0.12,
+    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const fill = new THREE.Mesh(
+    new THREE.CylinderGeometry(93, 50, 19, 48, 1, true, thetaStart, thetaLen), fillMat);
+  fill.position.set(PITCH.x, 10.5, PITCH.z);
+  // borde superior brillante: marca clara y prolija del sector elegido
+  const bandMat = new THREE.MeshBasicMaterial({
+    color: 0xffe36b, transparent: true, opacity: 0.7,
     side: THREE.DoubleSide, depthWrite: false,
   });
-  areaHL = new THREE.Mesh(geo, mat);
-  areaHL.position.set(PITCH.x, 10.5, PITCH.z);
-  areaHL.renderOrder = 2;
+  const band = new THREE.Mesh(
+    new THREE.CylinderGeometry(94.5, 89, 2.4, 48, 1, true, thetaStart, thetaLen), bandMat);
+  band.position.set(PITCH.x, 18.6, PITCH.z);
+  g.add(fill, band);
+  g.userData = { fillMat, bandMat };
+  areaHL = g;
   scene.add(areaHL);
 }
-function hideAreaHighlight() { if (areaHL) { scene.remove(areaHL); areaHL.geometry.dispose(); areaHL.material.dispose(); areaHL = null; } }
+function hideAreaHighlight() {
+  if (!areaHL) return;
+  scene.remove(areaHL);
+  areaHL.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+  areaHL = null;
+}
 
 /* ============================================================ Carga ======== */
 const loaderEl = document.getElementById('loader');
@@ -554,7 +571,11 @@ function animate() {
     const s = 1 + Math.sin(t * 3) * 0.08;
     marker.scale.setScalar(s);
   }
-  if (areaHL) areaHL.material.opacity = 0.3 + (Math.sin(t * 2.3) * 0.5 + 0.5) * 0.2;
+  if (areaHL) {
+    const p = Math.sin(t * 2.3) * 0.5 + 0.5;
+    areaHL.userData.fillMat.opacity = 0.08 + p * 0.12;
+    areaHL.userData.bandMat.opacity = 0.55 + p * 0.3;
+  }
 
   if (tween) {
     tween.t += dt / (tween.duration / 1000);
