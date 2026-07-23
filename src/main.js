@@ -9,7 +9,12 @@ import { AREAS, PITCH_CENTER, fmtPrice, areaFromAngle } from './areas.js';
 const STADIUM_CENTER = new THREE.Vector3(3.8, 7, 3.6);
 const PITCH = new THREE.Vector3(PITCH_CENTER.x, PITCH_CENTER.y, PITCH_CENTER.z);
 const OVERVIEW_POS = new THREE.Vector3(150, 108, 178);
-const MODEL_URL = './models/RACING_3D.glb';
+// En desarrollo se carga el modelo local; en producción, desde jsDelivr (CDN
+// sobre el repo público) para no tener que subir el binario en cada deploy.
+const IS_LOCAL = ['localhost', '127.0.0.1', ''].includes(location.hostname);
+const MODEL_URL = IS_LOCAL
+  ? './models/RACING_3D.glb'
+  : 'https://cdn.jsdelivr.net/gh/MartinPuli/cilindro@c59dc48f3f2386b738fce4b32dae7c9a631106a5/public/models/RACING_3D.glb';
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
