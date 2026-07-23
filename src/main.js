@@ -65,13 +65,74 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.4;
 
-/* Suelo (el barrio se quitó del modelo) */
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x2f4a34, roughness: 1, metalness: 0 });
-const ground = new THREE.Mesh(new THREE.CircleGeometry(430, 64), groundMat);
+/* Suelo: pasto alrededor del estadio que se transforma en ciudad hacia afuera */
+function makeGroundTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 1024;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(512, 512, 60, 512, 512, 512);
+  g.addColorStop(0.0, '#3a5740');
+  g.addColorStop(0.16, '#3e5c43');
+  g.addColorStop(0.24, '#6e6857');
+  g.addColorStop(0.55, '#6a655a');
+  g.addColorStop(1.0, '#4c4842');
+  x.fillStyle = g;
+  x.fillRect(0, 0, 1024, 1024);
+  // trama de calles sutil
+  x.strokeStyle = 'rgba(25,24,20,0.13)';
+  x.lineWidth = 3;
+  for (let p = 96; p < 1024; p += 96) {
+    x.beginPath(); x.moveTo(p, 0); x.lineTo(p, 1024); x.stroke();
+    x.beginPath(); x.moveTo(0, p); x.lineTo(1024, p); x.stroke();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+const groundMat = new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 1, metalness: 0 });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(440, 72), groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.02;
 ground.receiveShadow = true;
 scene.add(ground);
+
+/* Barrio bajo alrededor del estadio (sutil, se desvanece con la niebla) */
+(function buildNeighborhood() {
+  const geo = new THREE.BoxGeometry(1, 1, 1);
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
+  const MAX = 300;
+  const inst = new THREE.InstancedMesh(geo, mat, MAX);
+  inst.castShadow = true;
+  inst.receiveShadow = true;
+  const m = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), scl = new THREE.Vector3(), col = new THREE.Color();
+  const palette = ['#9c988e', '#b3aa96', '#8f938d', '#a7a199', '#82817a', '#b8b1a0', '#767b7d'];
+  const block = 30;
+  let i = 0;
+  for (let gx = -9; gx <= 9; gx++) {
+    for (let gz = -9; gz <= 9; gz++) {
+      if (i >= MAX) break;
+      const cx = PITCH.x + gx * block + (Math.random() - 0.5) * 11;
+      const cz = PITCH.z + gz * block + (Math.random() - 0.5) * 11;
+      const r = Math.hypot(cx - PITCH.x, cz - PITCH.z);
+      if (r < 122 || r > 250) continue;      // libre el estadio; anillo de ~4 manzanas
+      if (Math.random() < 0.14) continue;    // huecos: plazas, calles, baldíos
+      const w = 11 + Math.random() * 16;
+      const d = 11 + Math.random() * 16;
+      const h = 4 + Math.random() * Math.random() * 22; // mayoría bajos
+      pos.set(cx, h / 2 - 0.02, cz);
+      scl.set(w, h, d);
+      m.compose(pos, q, scl);
+      inst.setMatrixAt(i, m);
+      col.set(palette[(Math.random() * palette.length) | 0]).multiplyScalar(0.82 + Math.random() * 0.3);
+      inst.setColorAt(i, col);
+      i++;
+    }
+  }
+  inst.count = i;
+  inst.instanceMatrix.needsUpdate = true;
+  scene.add(inst);
+})();
 
 /* ============================================================ Luces ======== */
 const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x45543f, 0.85);
@@ -110,14 +171,14 @@ function applyDayNight(night) {
     scene.background = SKY.night; scene.fog.color.set(0x0b1c33); scene.environmentIntensity = 0.16;
     hemi.color.set(0x2c4a6e); hemi.groundColor.set(0x0a1420); hemi.intensity = 0.4;
     sun.color.set(0x8fb4e8); sun.intensity = 0.3;
-    groundMat.color.set(0x101c18);
+    groundMat.color.set(0x2a333e);
     renderer.toneMappingExposure = 1.12;
     floodGroup.children.forEach((f) => (f.intensity = 900));
   } else {
     scene.background = SKY.day; scene.fog.color.set(0xcfe6f5); scene.environmentIntensity = 0.4;
     hemi.color.set(0xbfe3ff); hemi.groundColor.set(0x45543f); hemi.intensity = 0.85;
     sun.color.set(0xfff4e2); sun.intensity = 2.5;
-    groundMat.color.set(0x2f4a34);
+    groundMat.color.set(0xffffff);
     renderer.toneMappingExposure = 1.0;
     floodGroup.children.forEach((f) => (f.intensity = 0));
   }
@@ -190,6 +251,8 @@ gltfLoader.load(
         mat.side = THREE.FrontSide;
         // celeste de Racing más fiel para los asientos (oficial ~#029CDC)
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x2ea3e0);
+        // el Cilindro tiene techo celeste translúcido (en el modelo venía gris)
+        if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x8ec4e2);
         // rayado del corte de césped: la mitad alterna, un verde más oscuro
         if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
           o.material = mat.clone();
@@ -289,10 +352,12 @@ function goSeat(seat) {
   startTween({
     toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
     onDone: () => {
+      // desde la butaca también se navega en 3D (orbitar la cancha + zoom)
       mode = 'seat';
-      const dir = look.clone().sub(eye).normalize();
-      seatYawPitch.yaw = Math.atan2(dir.x, dir.z);
-      seatYawPitch.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+      controls.target.copy(PITCH);
+      controls.enabled = true;
+      controls.minDistance = 8;
+      controls.maxDistance = 185;
     },
   });
   setModeTag(seat.area.name);
@@ -333,32 +398,20 @@ function pickSeat(clientX, clientY) {
 }
 
 /* ============================================================ Puntero ======= */
-let downX = 0, downY = 0, downT = 0, dragging = false, moved = 0;
-const LOOK_SENS = 0.0028;
+// Para elegir butaca detectamos un "toque" (poco movimiento) sobre la tribuna.
+let downX = 0, downY = 0, dragging = false, moved = 0;
 canvas.addEventListener('pointerdown', (e) => {
   downX = e.clientX; downY = e.clientY; moved = 0; dragging = true;
-  if (mode === 'seat') canvas.setPointerCapture(e.pointerId);
 });
 canvas.addEventListener('pointermove', (e) => {
   if (!dragging) return;
   moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
-  if (mode === 'seat') {
-    const dx = e.movementX || 0, dy = e.movementY || 0;
-    seatYawPitch.yaw -= dx * LOOK_SENS;
-    seatYawPitch.pitch = THREE.MathUtils.clamp(seatYawPitch.pitch + dy * LOOK_SENS, -0.7, 0.5);
-  }
 });
 canvas.addEventListener('pointerup', (e) => {
   dragging = false;
   if (mode === 'area' && moved < 7) pickSeat(e.clientX, e.clientY);
 });
 canvas.addEventListener('pointercancel', () => (dragging = false));
-canvas.addEventListener('wheel', (e) => {
-  if (mode !== 'seat') return;
-  e.preventDefault();
-  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 22, 74);
-  camera.updateProjectionMatrix();
-}, { passive: false });
 
 /* ============================================================ UI ============ */
 const sheet = document.getElementById('sheet');
@@ -500,14 +553,10 @@ function animate() {
     camera.updateProjectionMatrix();
     camera.lookAt(currentLook);
     if (tween.t >= 1) { const d = tween.onDone; tween = null; if (d) d(); }
-  } else if (mode === 'overview' || mode === 'area') {
+  } else {
+    // overview | area | seat: todos navegables en 3D con OrbitControls
     controls.update();
     currentLook.copy(controls.target);
-  } else if (mode === 'seat') {
-    const cp = Math.cos(seatYawPitch.pitch);
-    const dir = new THREE.Vector3(Math.sin(seatYawPitch.yaw) * cp, Math.sin(seatYawPitch.pitch), Math.cos(seatYawPitch.yaw) * cp);
-    currentLook.copy(camera.position).add(dir);
-    camera.lookAt(currentLook);
   }
 
   renderer.render(scene, camera);
