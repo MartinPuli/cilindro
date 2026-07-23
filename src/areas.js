@@ -1,13 +1,16 @@
 // Sectores REALES de El Cilindro (Estadio Presidente Perón), según el mapa
-// oficial de Racing Club: plateas por letra (A, B, C, E…), Platea Damas, y
-// populares Sur (local) y Norte (visitante). La cancha está centrada en
-// ~(3.8, 0, 3.6); los arcos corren sobre el eje Z (Sur = +Z, Norte = -Z) y las
-// plateas laterales sobre el eje X.
+// oficial de Racing Club: populares Sur (local) y Norte (visitante) en las
+// cabeceras bajas, plateas laterales (A, B), plateas de codo (C, Damas) y
+// plateas de la bandeja alta (D, E — la E, detrás del arco local).
 //
-// Cada área define una cámara `view` para encuadrar esa tribuna (y poder elegir
-// la butaca tocando), y metadatos para la ficha.
+// La cancha está centrada en ~(3.8, 0, 3.6); los arcos corren sobre el eje Z
+// (Sur = +Z, Norte = -Z) y las plateas laterales sobre el eje X.
+//
+// `ang` = dirección de la tribuna respecto del centro.
+// `band` = altura: 'low' (bandeja baja / popular), 'high' (bandeja alta) o 'all'.
 
 export const PITCH_CENTER = { x: 3.8, y: 1.2, z: 3.6 };
+export const HIGH_Y = 10.5; // límite entre bandeja baja y alta
 
 export const fmtPrice = (n) =>
   '$' + Math.round(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
@@ -19,9 +22,9 @@ export const AREAS = [
     name: 'Popular Sur',
     tier: 'Cabecera Sur · Local',
     kind: 'popular',
+    band: 'low',
     color: '#eef3f7',
     priceFrom: 16000,
-    view: { pos: { x: 4, y: 24, z: -24 }, look: { x: 4, y: 10, z: 84 }, fov: 56 },
     ang: Math.PI / 2, // +Z
     desc: 'El corazón del aguante académico, detrás del arco Sur. La popular local del Cilindro.',
   },
@@ -30,9 +33,9 @@ export const AREAS = [
     name: 'Popular Norte',
     tier: 'Cabecera Norte · Visitante',
     kind: 'popular',
+    band: 'low',
     color: '#cfe0ee',
     priceFrom: 15000,
-    view: { pos: { x: 4, y: 26, z: 32 }, look: { x: 4, y: 11, z: -80 }, fov: 56 },
     ang: -Math.PI / 2, // -Z
     desc: 'Cabecera Norte, detrás del otro arco. Sector para la hinchada visitante.',
   },
@@ -41,9 +44,9 @@ export const AREAS = [
     name: 'Platea A',
     tier: 'Lateral · Preferencial',
     kind: 'platea',
+    band: 'all',
     color: '#5bb6ea',
     priceFrom: 52000,
-    view: { pos: { x: 34, y: 26, z: 4 }, look: { x: -74, y: 10, z: 4 }, fov: 52 },
     ang: Math.PI, // -X
     desc: 'La platea más exclusiva del Cilindro, sobre el lateral. Mediocampo justo de frente.',
   },
@@ -52,9 +55,9 @@ export const AREAS = [
     name: 'Platea B',
     tier: 'Lateral Este',
     kind: 'platea',
+    band: 'all',
     color: '#70c5e8',
     priceFrom: 42000,
-    view: { pos: { x: -26, y: 26, z: 4 }, look: { x: 86, y: 11, z: 4 }, fov: 52 },
     ang: 0, // +X
     desc: 'Platea lateral, de frente a las cámaras de TV. El sol de tarde a favor.',
   },
@@ -63,9 +66,9 @@ export const AREAS = [
     name: 'Platea C',
     tier: 'Codo Sudeste',
     kind: 'platea',
+    band: 'all',
     color: '#8fd3f2',
     priceFrom: 34000,
-    view: { pos: { x: -22, y: 28, z: -22 }, look: { x: 60, y: 13, z: 60 }, fov: 50 },
     ang: Math.PI / 4, // +X+Z
     desc: 'Platea en el codo, con una gran vista diagonal de toda la cancha.',
   },
@@ -74,24 +77,50 @@ export const AREAS = [
     name: 'Platea Damas',
     tier: 'Codo Sur · Puerta 5',
     kind: 'platea',
+    band: 'all',
     color: '#a7dbef',
     priceFrom: 30000,
-    view: { pos: { x: 34, y: 24, z: -24 }, look: { x: -56, y: 11, z: 58 }, fov: 52 },
     ang: (3 * Math.PI) / 4, // -X+Z
     desc: 'Sector histórico junto a la Popular Sur, sobre el codo Sudoeste (Puerta 5).',
   },
+  {
+    id: 'platea-e',
+    name: 'Platea E',
+    tier: 'Bandeja Alta · detrás del arco local',
+    kind: 'platea',
+    band: 'high',
+    color: '#9ad7f5',
+    priceFrom: 28000,
+    ang: Math.PI / 2, // +Z (arriba de la Popular Sur)
+    desc: 'En lo alto, detrás del arco local, sobre la Popular Sur. Vista panorámica de toda la cancha.',
+  },
+  {
+    id: 'platea-d',
+    name: 'Platea D',
+    tier: 'Bandeja Alta · Norte',
+    kind: 'platea',
+    band: 'high',
+    color: '#c2e6fa',
+    priceFrom: 26000,
+    ang: -Math.PI / 2, // -Z (arriba de la Popular Norte)
+    desc: 'Bandeja alta sobre la cabecera Norte. Panorámica desde lo alto del Cilindro.',
+  },
 ];
 
-// A qué área pertenece un punto del cuenco, según el ángulo respecto del centro.
-export function areaFromAngle(angle) {
-  let best = AREAS[0];
+// A qué sector pertenece un punto del cuenco, según su ángulo Y su altura
+// (así una misma cabecera tiene popular abajo y platea alta arriba).
+export function areaForSeat(x, z, y) {
+  const angle = Math.atan2(z - PITCH_CENTER.z, x - PITCH_CENTER.x);
+  let best = null;
   let bestD = Infinity;
   for (const a of AREAS) {
-    let d = Math.abs(Math.atan2(Math.sin(angle - a.ang), Math.cos(angle - a.ang)));
+    if (a.band === 'low' && y > HIGH_Y) continue;
+    if (a.band === 'high' && y <= HIGH_Y) continue;
+    const d = Math.abs(Math.atan2(Math.sin(angle - a.ang), Math.cos(angle - a.ang)));
     if (d < bestD) {
       bestD = d;
       best = a;
     }
   }
-  return best;
+  return best || AREAS[0];
 }

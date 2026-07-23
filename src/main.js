@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { AREAS, PITCH_CENTER, fmtPrice, areaFromAngle } from './areas.js';
+import { AREAS, PITCH_CENTER, fmtPrice, areaForSeat } from './areas.js';
 
 /* ============================================================ Escena ======= */
 const STADIUM_CENTER = new THREE.Vector3(3.8, 7, 3.6);
@@ -205,7 +205,8 @@ scene.add(marker);
 // mirando hacia la tribuna elegida — evita chocar con estructuras).
 function areaView(area) {
   const dir = new THREE.Vector3(Math.cos(area.ang), 0, Math.sin(area.ang));
-  const look = new THREE.Vector3(PITCH.x, 9, PITCH.z).addScaledVector(dir, 60);
+  const lookY = area.band === 'high' ? 14 : area.band === 'low' ? 6.5 : 9;
+  const look = new THREE.Vector3(PITCH.x, lookY, PITCH.z).addScaledVector(dir, area.band === 'high' ? 66 : 60);
   const pos = new THREE.Vector3(PITCH.x, 16.5, PITCH.z).addScaledVector(dir, 7);
   const fov = area.kind === 'popular' ? 60 : 55;
   return { pos, look, fov };
@@ -217,6 +218,10 @@ function showAreaHighlight(area) {
   hideAreaHighlight();
   const thetaLen = area.kind === 'popular' ? 1.55 : 1.2;
   const thetaStart = (Math.PI / 2 - area.ang) - thetaLen / 2; // convención CylinderGeometry
+  // rango de altura según la banda del sector (baja / alta / toda)
+  const lo = area.band === 'high' ? 10.5 : 1;
+  const hi = area.band === 'low' ? 10.5 : 20;
+  const rAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
   const g = new THREE.Group();
   // glow amarillo suave sobre la tribuna (no tapa los asientos)
   const fillMat = new THREE.MeshBasicMaterial({
@@ -224,16 +229,16 @@ function showAreaHighlight(area) {
     side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const fill = new THREE.Mesh(
-    new THREE.CylinderGeometry(93, 50, 19, 48, 1, true, thetaStart, thetaLen), fillMat);
-  fill.position.set(PITCH.x, 10.5, PITCH.z);
-  // borde superior brillante: marca clara y prolija del sector elegido
+    new THREE.CylinderGeometry(rAt(hi), rAt(lo), hi - lo, 48, 1, true, thetaStart, thetaLen), fillMat);
+  fill.position.set(PITCH.x, (lo + hi) / 2, PITCH.z);
+  // borde brillante en el tope de la banda: marca clara y prolija del sector
   const bandMat = new THREE.MeshBasicMaterial({
     color: 0xffe36b, transparent: true, opacity: 0.7,
     side: THREE.DoubleSide, depthWrite: false,
   });
   const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(94.5, 89, 2.4, 48, 1, true, thetaStart, thetaLen), bandMat);
-  band.position.set(PITCH.x, 18.6, PITCH.z);
+    new THREE.CylinderGeometry(rAt(hi + 1.3), rAt(hi - 1.3), 2.4, 48, 1, true, thetaStart, thetaLen), bandMat);
+  band.position.set(PITCH.x, hi, PITCH.z);
   g.add(fill, band);
   g.userData = { fillMat, bandMat };
   areaHL = g;
@@ -406,7 +411,7 @@ function pickSeat(clientX, clientY) {
     const r = Math.hypot(p.x - PITCH.x, p.z - PITCH.z);
     if (r < 34 || r > 100 || p.y < 1.2 || p.y > 20) continue; // debe ser una tribuna (no techo)
     const angle = Math.atan2(p.z - PITCH.z, p.x - PITCH.x);
-    const area = areaFromAngle(angle);
+    const area = areaForSeat(p.x, p.z, p.y);
     // si tocaste el lugar de otro sector, te cambia a ese sector
     if (area !== activeArea) {
       activeArea = area;

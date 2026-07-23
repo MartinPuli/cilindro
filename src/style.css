@@ -164,6 +164,7 @@ html, body {
 /* Area grid */
 .area-grid {
   display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; margin-top: 14px;
+  max-height: 46vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
 }
 .area-card {
   display: flex; align-items: center; gap: 11px; text-align: left;
