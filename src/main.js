@@ -232,51 +232,18 @@ function seatSold(area, fila, colNum) {
 }
 
 /* ====================================================== Resaltado de área == */
-// Al elegir un sector, esa tribuna SE ILUMINA en celeste: un glow sobre el cuenco
-// + (en las plateas) un realce emisivo de las propias butacas via shader.
-let areaHL = null;
+// Al elegir un sector, a esa tribuna se le SUBE EL BRILLO (las butacas se
+// iluminan con su propio color, vía shader). Sin paneles superpuestos.
 function showAreaHighlight(area) {
-  hideAreaHighlight();
-  const thetaLen = area.kind === 'popular' ? 1.55 : 1.2;
-  const thetaStart = (Math.PI / 2 - area.ang) - thetaLen / 2; // convención CylinderGeometry
   const lo = area.band === 'high' ? 10.5 : 1;
   const hi = area.band === 'low' ? 10.5 : 20;
-  const rAt = bowlRadiusAt;
-  const g = new THREE.Group();
-  // baño de luz celeste sobre la tribuna elegida
-  const fillMat = new THREE.MeshBasicMaterial({
-    color: 0x4fc6ff, transparent: true, opacity: 0.2,
-    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-  });
-  const fill = new THREE.Mesh(
-    new THREE.CylinderGeometry(rAt(hi), rAt(lo), hi - lo, 48, 1, true, thetaStart, thetaLen), fillMat);
-  fill.position.set(PITCH.x, (lo + hi) / 2, PITCH.z);
-  // borde brillante arriba: remarca prolijo del sector
-  const bandMat = new THREE.MeshBasicMaterial({
-    color: 0xbdeeff, transparent: true, opacity: 0.85,
-    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
-  });
-  const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(rAt(hi + 1.3), rAt(hi - 1.3), 2.6, 48, 1, true, thetaStart, thetaLen), bandMat);
-  band.position.set(PITCH.x, hi, PITCH.z);
-  g.add(fill, band);
-  g.userData = { fillMat, bandMat };
-  areaHL = g;
-  scene.add(areaHL);
-  // realce de las butacas del sector (shader): ángulo y banda activos
   seatGlow.active = 1;
   seatGlow.ang = area.ang;
   seatGlow.half = (area.kind === 'popular' ? 1.55 : 1.2) / 2;
   seatGlow.ylo = lo - 0.5;
   seatGlow.yhi = hi + 0.5;
 }
-function hideAreaHighlight() {
-  seatGlow.active = 0;
-  if (!areaHL) return;
-  scene.remove(areaHL);
-  areaHL.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
-  areaHL = null;
-}
+function hideAreaHighlight() { seatGlow.active = 0; }
 
 /* ============================================================ Carga ======== */
 const loaderEl = document.getElementById('loader');
@@ -285,16 +252,20 @@ const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
 
-/* Las franjas celestes y blancas de las tribunas vienen del PROPIO modelo
-   (butacas primarias celestes + secundarias blancas, como el estadio real).
-   Acá sólo agregamos un shader de ILUMINACIÓN: realza en celeste la tribuna
-   del sector elegido, sin tocar los colores originales. */
-const SEAT_GLOWC = new THREE.Color(0x3fc0ff).convertSRGBToLinear();
+/* Franjas RADIALES celestes y blancas, PAREJAS y CONTINUAS en todo el anillo,
+   como la foto aérea real (sin zonas todo celestes o todo blancas). Además el
+   mismo shader SUBE EL BRILLO de las butacas del sector elegido (nada de
+   paneles superpuestos): la tribuna se ilumina con su propio color. */
+const SEAT_STRIPES = 20.0; // pares de franjas (20 celestes + 20 blancas)
+const SEAT_CEL = new THREE.Color(0x2f93d2).convertSRGBToLinear();
+const SEAT_WHT = new THREE.Color(0xf0f4f7).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-function addSeatGlow(mat) {
+function addSeatStripes(mat) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uPitchXZ: { value: PITCH_XZ }, uGlowC: { value: SEAT_GLOWC },
+      uStripes: { value: SEAT_STRIPES },
+      uCel: { value: SEAT_CEL }, uWht: { value: SEAT_WHT },
+      uPitchXZ: { value: PITCH_XZ },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
       uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
     });
@@ -304,9 +275,11 @@ function addSeatGlow(mat) {
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+        '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+      .replace('#include <color_fragment>',
+        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float s = (atan(dxz.y, dxz.x) + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }')
       .replace('#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += uGlowC * (0.45 + 0.55 * uActPulse);\n    }\n  }');
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.32 + 0.14 * uActPulse);\n    }\n  }');
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -325,13 +298,23 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas: colores ORIGINALES del modelo (celeste + blanco alternado,
-        // como el estadio real); sólo les sumamos el shader de iluminación
+        // butacas: franjas radiales celestes/blancas parejas en todo el anillo
+        // (el mismo shader sube el brillo del sector elegido)
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addSeatGlow(mat); }
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addSeatStripes(mat); }
         }
-        // el techo real es gris grafito visto desde arriba (no celeste)
-        if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
+        // las gradas pintadas del cuenco (terrazas de las populares) también van
+        // con las franjas, como en la foto aérea (clonado: los túneles no)
+        if (/Continuous_Terraces/.test(o.name) &&
+            (mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE')) {
+          o.material = mat.clone();
+          addSeatStripes(o.material);
+        }
+        // techo: gris grafito arriba (foto aérea); por dentro claro, casi blanco
+        if (mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
+        if (mat.name === 'BLK_STADIUM_ROOF') mat.color.setHex(0xc5cdd3);
+        // la visera interior del techo NO va negra: va blanca como en la realidad
+        if (mat.name === 'BLK_STADIUM_VISOR_A') mat.color.setHex(0xe2e7eb);
         // el alambrado (reja) entre el campo y las populares es una malla de acero
         // galvanizado: se ve la cancha a través, como el alambrado olímpico real
         if (mat.name === 'BLK_STADIUM_FENCE') {
@@ -766,12 +749,7 @@ function animate() {
     const s = 1 + Math.sin(t * 3) * 0.08;
     marker.scale.setScalar(s);
   }
-  if (areaHL) {
-    const p = Math.sin(t * 2.3) * 0.5 + 0.5;
-    areaHL.userData.fillMat.opacity = 0.14 + p * 0.2;
-    areaHL.userData.bandMat.opacity = 0.6 + p * 0.35;
-  }
-  // realce emisivo de las butacas del sector elegido (shader en ambos materiales)
+  // brillo de las butacas del sector elegido (shader en ambos materiales)
   const pulse = Math.sin(t * 2.6) * 0.5 + 0.5;
   for (const sh of seatShaders) {
     const u = sh.uniforms;
