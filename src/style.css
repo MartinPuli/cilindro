@@ -225,6 +225,33 @@ html, body {
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ---------- Joystick táctil (moverse en el celu) ---------- */
+#joystick {
+  position: fixed; z-index: 30; display: none;
+  left: max(18px, env(safe-area-inset-left, 0px)); top: 50%;
+  transform: translateY(-50%);
+  width: 116px; height: 116px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(20, 44, 68, 0.5), rgba(6, 16, 28, 0.4));
+  border: 1.5px solid rgba(130, 205, 245, 0.34);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), inset 0 0 22px rgba(110, 198, 236, 0.14);
+  touch-action: none;
+}
+#joystick::after {
+  content: '↑\A←   →\A↓'; white-space: pre; position: absolute; inset: 0;
+  display: grid; place-items: center; text-align: center;
+  font-size: 10px; line-height: 1.5; color: rgba(180, 220, 245, 0.35);
+  pointer-events: none;
+}
+#joyknob {
+  position: absolute; left: 50%; top: 50%;
+  width: 50px; height: 50px; border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: linear-gradient(160deg, var(--celeste), var(--celeste-deep));
+  box-shadow: 0 6px 16px rgba(30, 136, 199, 0.55), inset 0 2px 6px rgba(255, 255, 255, 0.4);
+  pointer-events: none; z-index: 1;
+}
+
 /* Desktop: floating panel instead of full-width sheet */
 @media (min-width: 720px) {
   #sheet { bottom: 22px; border-radius: 20px; border-bottom: 1px solid var(--glass-brd); width: min(92vw, 620px); }

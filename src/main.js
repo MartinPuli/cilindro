@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { AREAS, PITCH_CENTER, fmtPrice, areaForSeat } from './areas.js';
 
@@ -31,21 +30,60 @@ const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerH
 camera.position.copy(OVERVIEW_POS);
 camera.lookAt(STADIUM_CENTER);
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.08;
-controls.target.copy(STADIUM_CENTER);
-controls.minDistance = 26;
-controls.maxDistance = 470;
-controls.maxPolarAngle = Math.PI * 0.49;
-controls.rotateSpeed = 0.95;
-controls.zoomSpeed = 1.1;
-controls.zoomToCursor = true;
-controls.enablePan = true;              // moverse por el estadio (2 dedos / botón derecho)
-controls.screenSpacePanning = true;
-controls.keyPanSpeed = 24;
-// cortar la autorrotación apenas el usuario toca
-controls.addEventListener('start', () => { if (mode === 'overview' && !userRotate) controls.autoRotate = false; });
+/* ============================================================ Cámara libre ==
+   Navegación tipo "caminar/volar": moverse con flechas/WASD o joystick,
+   mirar arrastrando, y zoom con rueda/pellizco. En la butaca la posición queda
+   fija (sólo se gira la cabeza). */
+const view = { pos: OVERVIEW_POS.clone(), yaw: 0, pitch: 0, fov: 46 };
+const keys = new Set();
+const joy = { x: 0, y: 0 };
+let autoOrbit = false;
+
+function aimView(pos, look) {
+  view.pos.copy(pos);
+  const d = look.clone().sub(pos).normalize();
+  view.yaw = Math.atan2(d.x, d.z);
+  view.pitch = Math.asin(THREE.MathUtils.clamp(d.y, -1, 1));
+}
+function viewDir() {
+  const cp = Math.cos(view.pitch);
+  return new THREE.Vector3(Math.sin(view.yaw) * cp, Math.sin(view.pitch), Math.cos(view.yaw) * cp);
+}
+function clampPos() {
+  view.pos.y = THREE.MathUtils.clamp(view.pos.y, 2.5, 135);
+  const dx = view.pos.x - STADIUM_CENTER.x, dz = view.pos.z - STADIUM_CENTER.z;
+  const r = Math.hypot(dx, dz);
+  if (r > 440) { const s = 440 / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
+}
+function applyMove(dt) {
+  let mx = joy.x, my = joy.y, uy = 0;
+  if (keys.has('w') || keys.has('arrowup')) my += 1;
+  if (keys.has('s') || keys.has('arrowdown')) my -= 1;
+  if (keys.has('d') || keys.has('arrowright')) mx += 1;
+  if (keys.has('a') || keys.has('arrowleft')) mx -= 1;
+  if (keys.has(' ') || keys.has('e')) uy += 1;
+  if (keys.has('shift') || keys.has('q')) uy -= 1;
+  if (mx || my || uy) autoOrbit = false;
+  if (autoOrbit) { // giro suave alrededor del centro (botón 360°)
+    const dx = view.pos.x - STADIUM_CENTER.x, dz = view.pos.z - STADIUM_CENTER.z;
+    const a = Math.atan2(dz, dx) + dt * 0.14, r = Math.hypot(dx, dz);
+    view.pos.x = STADIUM_CENTER.x + Math.cos(a) * r;
+    view.pos.z = STADIUM_CENTER.z + Math.sin(a) * r;
+    aimView(view.pos, new THREE.Vector3(STADIUM_CENTER.x, view.pos.y - 14, STADIUM_CENTER.z));
+    return;
+  }
+  if (!mx && !my && !uy) return;
+  const speed = 34 * dt;
+  const d = viewDir();
+  const fwd = new THREE.Vector3(d.x, 0, d.z);
+  if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, 1);
+  fwd.normalize();
+  const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+  view.pos.addScaledVector(fwd, my * speed);
+  view.pos.addScaledVector(right, mx * speed);
+  view.pos.y += uy * speed;
+  clampPos();
+}
 
 /* ============================================================ Cielo/Env ==== */
 function makeSky(top, mid, bottom) {
@@ -272,16 +310,27 @@ gltfLoader.load(
       if (mat) {
         mat.side = THREE.FrontSide;
         // asientos celeste vívido como en el estadio real (foto aérea)
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x08a4e8);
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x0f9ee6);
+        // la franja celeste pintada sobre el cemento de las plateas (seña de Racing)
+        if (mat.name === 'BLK_STADIUM_TERR_STRIPE') mat.color.setHex(0x2f9fdd);
+        // cemento de las tribunas y del playón: gris claro parejo (resalta la
+        // franja y las butacas, y los costados quedan como pavimento, no un pozo)
+        if (mat.name === 'BLK_STADIUM_CONCRETE') { mat.color.setHex(0x70737a); mat.roughness = 0.92; }
         // el techo real es gris grafito visto desde arriba (no celeste)
         if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
-        // el alambrado del perímetro y de las populares es TRANSPARENTE (se ve la
-        // cancha a través, como en la realidad)
-        if (mat.name === 'BLK_STADIUM_FENCE' || mat.name === 'BLK_STADIUM_BARRIER') {
+        // el alambrado (reja) entre el campo y las populares es una malla de acero
+        // galvanizado: se ve la cancha a través, como el alambrado olímpico real
+        if (mat.name === 'BLK_STADIUM_FENCE') {
           mat.transparent = true;
-          mat.opacity = 0.12;
+          mat.opacity = 0.22;
           mat.depthWrite = false;
-          mat.color.setHex(0x2b3136);
+          mat.metalness = 0.7;
+          mat.roughness = 0.4;
+          mat.color.setHex(0x9aa6b0);
+        }
+        // las barandas/vallas bajas de las gradas SÍ son sólidas (metal pintado)
+        if (mat.name === 'BLK_STADIUM_BARRIER') {
+          mat.metalness = 0.45; mat.roughness = 0.5; mat.color.setHex(0x8b96a0);
         }
         // rayado del corte de césped: la mitad alterna, un verde más oscuro
         if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
@@ -312,8 +361,9 @@ function onReady() {
     setTimeout(() => { el.classList.remove('hidden-on-load'); el.classList.add('fade-in'); }, 220 + i * 80)
   );
   renderOverview();
-  controls.autoRotate = true; controls.autoRotateSpeed = 0.55;
-  setTimeout(() => { if (mode === 'overview' && !userRotate) controls.autoRotate = false; }, 4200);
+  aimView(OVERVIEW_POS.clone(), STADIUM_CENTER.clone());
+  view.fov = 46; autoOrbit = true; updateJoy();
+  setTimeout(() => { if (mode === 'overview' && !userRotate) autoOrbit = false; }, 4200);
 }
 
 /* ============================================================ Modos ========= */
@@ -334,18 +384,15 @@ function startTween({ toPos, toLook, toFov, duration = 1250, onDone }) {
   };
 }
 
-const seatYawPitch = { yaw: 0, pitch: 0 };
-
 function goOverview() {
   mode = 'transition'; activeArea = null; pendingSeat = null; marker.visible = false;
-  hideAreaHighlight();
-  controls.enabled = false; controls.autoRotate = false;
+  hideAreaHighlight(); updateJoy();
   startTween({
     toPos: OVERVIEW_POS.clone(), toLook: STADIUM_CENTER.clone(), toFov: 46, duration: 1250,
     onDone: () => {
-      mode = 'overview'; controls.target.copy(STADIUM_CENTER); controls.enabled = true;
-      controls.minDistance = 42; controls.maxDistance = 430;
-      controls.autoRotate = userRotate;
+      mode = 'overview';
+      aimView(OVERVIEW_POS.clone(), STADIUM_CENTER.clone());
+      view.fov = 46; autoOrbit = userRotate; updateJoy();
     },
   });
   setModeTag('Vista aérea');
@@ -355,14 +402,15 @@ function goOverview() {
 
 function goArea(area) {
   mode = 'transition'; activeArea = area; pendingSeat = null; marker.visible = false;
-  controls.enabled = false; controls.autoRotate = false;
+  autoOrbit = false;
   const v = areaView(area);
   showAreaHighlight(area);
   startTween({
     toPos: v.pos, toLook: v.look, toFov: v.fov, duration: 1300,
     onDone: () => {
-      mode = 'area'; controls.target.copy(v.look); controls.enabled = true;
-      controls.minDistance = 22; controls.maxDistance = 135;
+      mode = 'area';
+      aimView(v.pos.clone(), v.look.clone());
+      view.fov = v.fov; updateJoy();
     },
   });
   setModeTag(area.name);
@@ -373,7 +421,7 @@ function goArea(area) {
 function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
   hideAreaHighlight();
-  controls.enabled = false; controls.autoRotate = false;
+  autoOrbit = false;
   // altura natural de la butaca + un pasito hacia la cancha (el alambrado ya es
   // transparente, así que no hace falta subir de más)
   const eye = seat.point.clone();
@@ -386,10 +434,9 @@ function goSeat(seat) {
     onDone: () => {
       // en la butaca estás sentado: sólo girás la cabeza (primera persona, sin moverte)
       mode = 'seat';
-      controls.enabled = false;
-      const dir = look.clone().sub(camera.position).normalize();
-      seatYawPitch.yaw = Math.atan2(dir.x, dir.z);
-      seatYawPitch.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+      aimView(eye.clone(), look.clone());
+      view.fov = seat.area.kind === 'palco' ? 52 : 60;
+      updateJoy();
     },
   });
   setModeTag(seat.area.name);
@@ -432,35 +479,41 @@ function pickSeat(clientX, clientY) {
 }
 
 /* ============================================================ Puntero ======= */
-// En modo 'area': un "toque" (poco movimiento) elige la butaca.
-// En modo 'seat': arrastrar gira la cabeza (primera persona) y pellizcar hace zoom.
+// Arrastrar sobre la escena mira alrededor (girar la cabeza / la cámara).
+// En modo 'area', un "toque" (poco movimiento) elige la butaca.
+// Dos dedos = pellizco -> zoom (FOV). Moverse: flechas/WASD o el joystick.
 const LOOK_SENS = 0.0026;
 const pointers = new Map();
 let downX = 0, downY = 0, dragging = false, moved = 0, lastX = 0, lastY = 0, pinchDist = 0;
 
+function lookDrag(dx, dy) {
+  autoOrbit = false;
+  view.yaw -= dx * LOOK_SENS;
+  const lim = mode === 'seat' ? [-0.72, 0.55] : [-1.4, 0.9];
+  view.pitch = THREE.MathUtils.clamp(view.pitch + dy * LOOK_SENS, lim[0], lim[1]);
+}
+function zoomFov(delta) {
+  view.fov = THREE.MathUtils.clamp(view.fov + delta, 22, 74);
+}
+
 canvas.addEventListener('pointerdown', (e) => {
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   downX = lastX = e.clientX; downY = lastY = e.clientY; moved = 0; dragging = true;
-  if (mode === 'seat') { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
+  try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
 });
 canvas.addEventListener('pointermove', (e) => {
   const pt = pointers.get(e.pointerId);
   if (pt) { pt.x = e.clientX; pt.y = e.clientY; }
   if (dragging) moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
-  if (mode !== 'seat') return;
+  if (mode === 'transition') { lastX = e.clientX; lastY = e.clientY; return; }
   if (pointers.size >= 2) {
     // pellizco -> zoom (FOV)
     const [a, b] = [...pointers.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y);
-    if (pinchDist) {
-      camera.fov = THREE.MathUtils.clamp(camera.fov - (d - pinchDist) * 0.12, 22, 74);
-      camera.updateProjectionMatrix();
-    }
+    if (pinchDist) zoomFov(-(d - pinchDist) * 0.12);
     pinchDist = d;
   } else if (dragging) {
-    // girar la cabeza
-    seatYawPitch.yaw -= (e.clientX - lastX) * LOOK_SENS;
-    seatYawPitch.pitch = THREE.MathUtils.clamp(seatYawPitch.pitch + (e.clientY - lastY) * LOOK_SENS, -0.72, 0.55);
+    lookDrag(e.clientX - lastX, e.clientY - lastY);
   }
   lastX = e.clientX; lastY = e.clientY;
 });
@@ -475,11 +528,61 @@ canvas.addEventListener('pointerup', (e) => {
 });
 canvas.addEventListener('pointercancel', endPointer);
 canvas.addEventListener('wheel', (e) => {
-  if (mode !== 'seat') return; // en butaca la rueda hace zoom; en aérea/sector la maneja OrbitControls
+  if (mode === 'transition') return;
   e.preventDefault();
-  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 22, 74);
-  camera.updateProjectionMatrix();
+  zoomFov(e.deltaY * 0.03);
 }, { passive: false });
+
+/* ---- Teclado: flechas / WASD para moverse, Espacio/Shift para subir/bajar --- */
+const MOVE_KEYS = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ', 'e', 'q', 'shift']);
+window.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if (!MOVE_KEYS.has(k)) return;
+  keys.add(k);
+  if (mode !== 'seat') autoOrbit = false;
+  if (k.startsWith('arrow') || k === ' ') e.preventDefault();
+});
+window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+window.addEventListener('blur', () => keys.clear());
+
+/* ---- Joystick táctil ("circulito") para moverse en el celular --------------- */
+const joyEl = document.createElement('div');
+joyEl.id = 'joystick';
+joyEl.innerHTML = '<div id="joyknob"></div>';
+document.body.appendChild(joyEl);
+const joyKnob = joyEl.firstElementChild;
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+let joyId = null;
+function resetKnob() { joy.x = 0; joy.y = 0; joyKnob.style.transform = 'translate(-50%,-50%)'; }
+function updateJoy() {
+  // el joystick aparece en el celu cuando estás dentro de un sector (para
+  // caminar y acercarte a las butacas); en la vista aérea elegís de la lista.
+  const show = isTouch && mode === 'area';
+  joyEl.style.display = show ? 'block' : 'none';
+  if (!show) { joyId = null; resetKnob(); }
+}
+function joyMove(e) {
+  const r = joyEl.getBoundingClientRect();
+  const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const dx = e.clientX - cx, dy = e.clientY - cy;
+  const R = r.width / 2;
+  const len = Math.hypot(dx, dy) || 1;
+  const cl = Math.min(len, R);
+  const nx = dx / len, ny = dy / len;
+  joy.x = nx * (cl / R);
+  joy.y = -ny * (cl / R); // arriba en el joystick = avanzar
+  joyKnob.style.transform = `translate(calc(-50% + ${nx * cl}px), calc(-50% + ${ny * cl}px))`;
+}
+joyEl.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  joyId = e.pointerId; autoOrbit = false;
+  try { joyEl.setPointerCapture(e.pointerId); } catch (_) {}
+  joyMove(e);
+});
+joyEl.addEventListener('pointermove', (e) => { if (e.pointerId === joyId) joyMove(e); });
+function joyEnd(e) { if (e.pointerId === joyId) { joyId = null; resetKnob(); } }
+joyEl.addEventListener('pointerup', joyEnd);
+joyEl.addEventListener('pointercancel', joyEnd);
 
 /* ============================================================ UI ============ */
 const sheet = document.getElementById('sheet');
@@ -506,7 +609,7 @@ function renderOverview() {
   sheetContent.innerHTML = `
     <div class="sheet-kicker">Paso 1 de 2</div>
     <div class="sheet-title">Elegí tu sector</div>
-    <div class="sheet-sub">Tocá una tribuna del Cilindro para acercarte y elegir tu butaca.</div>
+    <div class="sheet-sub">Tocá una tribuna para acercarte. Movete con las flechas o el joystick, arrastrá para mirar y hacé zoom con la rueda o pellizcando.</div>
     <div class="area-grid">${cards}</div>`;
   sheetContent.querySelectorAll('.area-card').forEach((el) =>
     el.addEventListener('click', () => goArea(AREAS.find((a) => a.id === el.dataset.area)))
@@ -521,7 +624,7 @@ function renderArea(area, seat) {
       <div class="sheet-title">Tocá tu ${area.kind === 'popular' ? 'lugar' : 'butaca'}</div>
       <div class="pick-row">
         <span class="pick-pulse"></span>
-        <span class="pick-text">Tocá sobre la tribuna para elegir dónde te querés sentar. Arrastrá para mirar mejor.</span>
+        <span class="pick-text">Tocá sobre la tribuna para elegir tu lugar. Arrastrá para mirar y usá las flechas o el joystick para acercarte caminando.</span>
       </div>`;
     return;
   }
@@ -589,7 +692,7 @@ const btnRotate = document.getElementById('btn-rotate');
 btnRotate.addEventListener('click', () => {
   userRotate = !userRotate;
   btnRotate.classList.toggle('active', userRotate);
-  if (mode === 'overview') controls.autoRotate = userRotate;
+  if (mode === 'overview') autoOrbit = userRotate;
 });
 const btnDayNight = document.getElementById('btn-daynight');
 btnDayNight.addEventListener('click', () => {
@@ -631,19 +734,14 @@ function animate() {
     camera.updateProjectionMatrix();
     camera.lookAt(currentLook);
     if (tween.t >= 1) { const d = tween.onDone; tween = null; if (d) d(); }
-  } else if (mode === 'seat') {
-    // primera persona: la posición queda fija en la butaca, sólo gira la cabeza
-    const cp = Math.cos(seatYawPitch.pitch);
-    currentLook.set(
-      camera.position.x + Math.sin(seatYawPitch.yaw) * cp,
-      camera.position.y + Math.sin(seatYawPitch.pitch),
-      camera.position.z + Math.cos(seatYawPitch.yaw) * cp
-    );
-    camera.lookAt(currentLook);
   } else {
-    // aérea / sector: navegación libre con OrbitControls
-    controls.update();
-    currentLook.copy(controls.target);
+    // cámara libre: en aérea/sector te movés (flechas/joystick); en la butaca la
+    // posición queda fija y sólo girás la cabeza. Siempre podés mirar y hacer zoom.
+    if (mode !== 'seat') applyMove(dt);
+    camera.position.copy(view.pos);
+    if (camera.fov !== view.fov) { camera.fov = view.fov; camera.updateProjectionMatrix(); }
+    currentLook.copy(view.pos).add(viewDir());
+    camera.lookAt(currentLook);
   }
 
   renderer.render(scene, camera);
