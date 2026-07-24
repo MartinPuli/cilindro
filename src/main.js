@@ -53,10 +53,10 @@ function clampPos() {
   const dx = view.pos.x - STADIUM_CENTER.x, dz = view.pos.z - STADIUM_CENTER.z;
   const r = Math.hypot(dx, dz);
   if (mode === 'area') {
-    // dentro de un sector te movés DENTRO del cuenco: no te vas a la calle ni
-    // volás sobre el techo, así se siente como caminar por el estadio.
-    view.pos.y = THREE.MathUtils.clamp(view.pos.y, 3, 40);
-    const maxR = 96;
+    // dentro de un sector te movés por el cuenco; podés subir bastante alto para
+    // ver desde arriba, pero no te vas a la calle.
+    view.pos.y = THREE.MathUtils.clamp(view.pos.y, 3, 85);
+    const maxR = 110;
     if (r > maxR) { const s = maxR / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
   } else {
     // vista aérea: recorrido amplio alrededor del estadio
