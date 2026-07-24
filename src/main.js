@@ -266,21 +266,13 @@ const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
 
-/* Tribunas: las franjas celestes/blancas lindas vienen del PROPIO modelo
-   (bloques de butacas primarias/secundarias). El shader hace dos cosas:
-   - striped=true SOLO para las gradas del cuenco que quedaban lisas
-     (terrazas pintadas): les agrega las mismas franjas radiales.
-   - siempre: SUBE EL BRILLO de la tribuna del sector elegido, con su propio
-     color y el recorte EXACTO del sector (mismo criterio que areaForSeat). */
-const SEAT_STRIPES = 20.0; // pares de franjas en las gradas pintadas
-const SEAT_CEL = new THREE.Color(0x4fb2e2).convertSRGBToLinear(); // celeste Racing (claro)
-const SEAT_WHT = new THREE.Color(0xeef3f7).convertSRGBToLinear();
+/* Tribunas: los colores quedan EXACTAMENTE como vienen en el modelo (sin
+   franjas ni recolores nuestros). El shader sólo SUBE EL BRILLO de la tribuna
+   del sector elegido, con el recorte exacto (mismo criterio que areaForSeat). */
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-function addStandShader(mat, striped) {
+function addStandShader(mat) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uStripes: { value: SEAT_STRIPES },
-      uCel: { value: SEAT_CEL }, uWht: { value: SEAT_WHT },
       uPitchXZ: { value: PITCH_XZ },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
       uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
@@ -291,18 +283,9 @@ function addStandShader(mat, striped) {
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.38 + 0.18 * uActPulse);\n    }\n  }');
-    // franjas (si corresponde) + FILETE divisorio negro en el límite exacto de
-    // cada sector (los límites están cada PI/4, corridos PI/8): separa bien
-    // plateas y populares, y coincide con el borde de la iluminación.
-    const stripeCode = striped
-      ? '\n    float s = (ang + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;'
-      : '';
-    sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
-      '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);' + stripeCode +
-      '\n    float mB = mod(ang - 0.39269908, 0.78539816);\n    float dB = min(mB, 0.78539816 - mB);\n    if (dB < 0.008) diffuseColor.rgb *= 0.3;\n  }');
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -321,25 +304,19 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas: los bloques celestes del modelo quedan tal cual (hermosos);
-        // los bloques BLANCOS gigantes se rompen con franjas para que no haya
-        // zonas enteras de un solo color
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
-          mat.color.setHex(0x59b8e6); // celeste oficial
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, false); }
+        // tribunas: colores TAL CUAL el modelo (sin recolor ni franjas); el
+        // shader sólo agrega la iluminación del sector elegido
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat); }
         }
-        if (mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, true); }
-        }
-        // TODA superficie lisa del cuenco (terrazas pintadas, paredones y las
-        // gradas de las medialunas) lleva las franjas radiales: no queda ninguna
-        // zona todo blanca o todo celeste. Los túneles quedan afuera.
-        const isBowlPaint =
+        // las gradas/terrazas y paredones del cuenco también se iluminan con el
+        // sector (clonado para no afectar a los túneles), sin cambiar su color
+        const isBowlStand =
           ((mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE') && !/Tunnel/.test(o.name)) ||
           (mat.name === 'BLK_FEATURE' && /Wall|Seating/.test(o.name));
-        if (isBowlPaint) {
+        if (isBowlStand) {
           o.material = mat.clone();
-          addStandShader(o.material, true);
+          addStandShader(o.material);
         }
         // techo: gris grafito arriba (foto aérea); por dentro claro, casi blanco
         if (mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
