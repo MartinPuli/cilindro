@@ -384,12 +384,12 @@ function goSeat(seat) {
   startTween({
     toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
     onDone: () => {
-      // desde la butaca también se navega en 3D (orbitar la cancha + zoom)
+      // en la butaca estás sentado: sólo girás la cabeza (primera persona, sin moverte)
       mode = 'seat';
-      controls.target.copy(PITCH);
-      controls.enabled = true;
-      controls.minDistance = 8;
-      controls.maxDistance = 185;
+      controls.enabled = false;
+      const dir = look.clone().sub(camera.position).normalize();
+      seatYawPitch.yaw = Math.atan2(dir.x, dir.z);
+      seatYawPitch.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
     },
   });
   setModeTag(seat.area.name);
@@ -432,20 +432,54 @@ function pickSeat(clientX, clientY) {
 }
 
 /* ============================================================ Puntero ======= */
-// Para elegir butaca detectamos un "toque" (poco movimiento) sobre la tribuna.
-let downX = 0, downY = 0, dragging = false, moved = 0;
+// En modo 'area': un "toque" (poco movimiento) elige la butaca.
+// En modo 'seat': arrastrar gira la cabeza (primera persona) y pellizcar hace zoom.
+const LOOK_SENS = 0.0026;
+const pointers = new Map();
+let downX = 0, downY = 0, dragging = false, moved = 0, lastX = 0, lastY = 0, pinchDist = 0;
+
 canvas.addEventListener('pointerdown', (e) => {
-  downX = e.clientX; downY = e.clientY; moved = 0; dragging = true;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  downX = lastX = e.clientX; downY = lastY = e.clientY; moved = 0; dragging = true;
+  if (mode === 'seat') { try { canvas.setPointerCapture(e.pointerId); } catch (_) {} }
 });
 canvas.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
+  const pt = pointers.get(e.pointerId);
+  if (pt) { pt.x = e.clientX; pt.y = e.clientY; }
+  if (dragging) moved = Math.max(moved, Math.hypot(e.clientX - downX, e.clientY - downY));
+  if (mode !== 'seat') return;
+  if (pointers.size >= 2) {
+    // pellizco -> zoom (FOV)
+    const [a, b] = [...pointers.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (pinchDist) {
+      camera.fov = THREE.MathUtils.clamp(camera.fov - (d - pinchDist) * 0.12, 22, 74);
+      camera.updateProjectionMatrix();
+    }
+    pinchDist = d;
+  } else if (dragging) {
+    // girar la cabeza
+    seatYawPitch.yaw -= (e.clientX - lastX) * LOOK_SENS;
+    seatYawPitch.pitch = THREE.MathUtils.clamp(seatYawPitch.pitch + (e.clientY - lastY) * LOOK_SENS, -0.72, 0.55);
+  }
+  lastX = e.clientX; lastY = e.clientY;
 });
+function endPointer(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinchDist = 0;
+  if (pointers.size === 0) dragging = false;
+}
 canvas.addEventListener('pointerup', (e) => {
-  dragging = false;
-  if (mode === 'area' && moved < 7) pickSeat(e.clientX, e.clientY);
+  if (mode === 'area' && moved < 7 && pointers.size <= 1) pickSeat(e.clientX, e.clientY);
+  endPointer(e);
 });
-canvas.addEventListener('pointercancel', () => (dragging = false));
+canvas.addEventListener('pointercancel', endPointer);
+canvas.addEventListener('wheel', (e) => {
+  if (mode !== 'seat') return; // en butaca la rueda hace zoom; en aérea/sector la maneja OrbitControls
+  e.preventDefault();
+  camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY * 0.03, 22, 74);
+  camera.updateProjectionMatrix();
+}, { passive: false });
 
 /* ============================================================ UI ============ */
 const sheet = document.getElementById('sheet');
@@ -591,8 +625,17 @@ function animate() {
     camera.updateProjectionMatrix();
     camera.lookAt(currentLook);
     if (tween.t >= 1) { const d = tween.onDone; tween = null; if (d) d(); }
+  } else if (mode === 'seat') {
+    // primera persona: la posición queda fija en la butaca, sólo gira la cabeza
+    const cp = Math.cos(seatYawPitch.pitch);
+    currentLook.set(
+      camera.position.x + Math.sin(seatYawPitch.yaw) * cp,
+      camera.position.y + Math.sin(seatYawPitch.pitch),
+      camera.position.z + Math.cos(seatYawPitch.yaw) * cp
+    );
+    camera.lookAt(currentLook);
   } else {
-    // overview | area | seat: todos navegables en 3D con OrbitControls
+    // aérea / sector: navegación libre con OrbitControls
     controls.update();
     currentLook.copy(controls.target);
   }
