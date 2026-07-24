@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { AREAS, PITCH_CENTER, fmtPrice, areaForSeat } from './areas.js';
+import { AREAS, PITCH_CENTER, HIGH_Y, CAPACITY, fmtPrice, fmtNum, areaForSeat } from './areas.js';
 
 /* ============================================================ Escena ======= */
 const STADIUM_CENTER = new THREE.Vector3(3.8, 7, 3.6);
@@ -219,9 +219,12 @@ function areaView(area) {
   return { pos, look, fov };
 }
 
-const bowlRadiusAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
 const filaAt = (y) => THREE.MathUtils.clamp(Math.round((y - 1.6) / 0.42) + 1, 1, 58);
-const colNumAt = (angle) => 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214); // butaca numerada
+// butaca numerada: cada sector tiene ~cap/58 butacas por fila (capacidad real)
+function colNumAt(area, angle) {
+  const perRow = Math.max(40, Math.round(area.cap / 58));
+  return 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % perRow);
+}
 // Algunas butacas ya están ocupadas (ejemplo, sin marcarlas en el 3D): no se
 // pueden reservar. Es determinístico, así una misma butaca siempre da igual.
 function seatSold(area, fila, colNum) {
@@ -233,15 +236,24 @@ function seatSold(area, fila, colNum) {
 
 /* ====================================================== Resaltado de área == */
 // Al elegir un sector, a esa tribuna se le SUBE EL BRILLO (las butacas se
-// iluminan con su propio color, vía shader). Sin paneles superpuestos.
+// iluminan con su propio color, vía shader). El recorte angular es EXACTO:
+// el límite con el sector vecino es el punto medio, igual que areaForSeat.
+function bandsOverlap(a, b) { return a === 'all' || b === 'all' || a === b; }
+function sectorHalf(area) {
+  let min = Math.PI;
+  for (const o of AREAS) {
+    if (o === area || !bandsOverlap(area.band, o.band)) continue;
+    const d = Math.abs(Math.atan2(Math.sin(o.ang - area.ang), Math.cos(o.ang - area.ang)));
+    if (d > 1e-6 && d < min) min = d;
+  }
+  return min / 2;
+}
 function showAreaHighlight(area) {
-  const lo = area.band === 'high' ? 10.5 : 1;
-  const hi = area.band === 'low' ? 10.5 : 20;
   seatGlow.active = 1;
   seatGlow.ang = area.ang;
-  seatGlow.half = (area.kind === 'popular' ? 1.55 : 1.2) / 2;
-  seatGlow.ylo = lo - 0.5;
-  seatGlow.yhi = hi + 0.5;
+  seatGlow.half = sectorHalf(area);
+  seatGlow.ylo = area.band === 'high' ? HIGH_Y : 0.5;
+  seatGlow.yhi = area.band === 'low' ? HIGH_Y : 21;
 }
 function hideAreaHighlight() { seatGlow.active = 0; }
 
@@ -252,15 +264,17 @@ const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
 
-/* Franjas RADIALES celestes y blancas, PAREJAS y CONTINUAS en todo el anillo,
-   como la foto aérea real (sin zonas todo celestes o todo blancas). Además el
-   mismo shader SUBE EL BRILLO de las butacas del sector elegido (nada de
-   paneles superpuestos): la tribuna se ilumina con su propio color. */
-const SEAT_STRIPES = 20.0; // pares de franjas (20 celestes + 20 blancas)
-const SEAT_CEL = new THREE.Color(0x2f93d2).convertSRGBToLinear();
-const SEAT_WHT = new THREE.Color(0xf0f4f7).convertSRGBToLinear();
+/* Tribunas: las franjas celestes/blancas lindas vienen del PROPIO modelo
+   (bloques de butacas primarias/secundarias). El shader hace dos cosas:
+   - striped=true SOLO para las gradas del cuenco que quedaban lisas
+     (terrazas pintadas): les agrega las mismas franjas radiales.
+   - siempre: SUBE EL BRILLO de la tribuna del sector elegido, con su propio
+     color y el recorte EXACTO del sector (mismo criterio que areaForSeat). */
+const SEAT_STRIPES = 20.0; // pares de franjas en las gradas pintadas
+const SEAT_CEL = new THREE.Color(0x59b8e6).convertSRGBToLinear(); // celeste oficial
+const SEAT_WHT = new THREE.Color(0xf2f6f9).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-function addSeatStripes(mat) {
+function addStandShader(mat, striped) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uStripes: { value: SEAT_STRIPES },
@@ -276,10 +290,12 @@ function addSeatStripes(mat) {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
         '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
-      .replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float s = (atan(dxz.y, dxz.x) + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }')
       .replace('#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.32 + 0.14 * uActPulse);\n    }\n  }');
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.4 + 0.18 * uActPulse);\n    }\n  }');
+    if (striped) {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
+        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float s = (atan(dxz.y, dxz.x) + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }');
+    }
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -298,17 +314,18 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas: franjas radiales celestes/blancas parejas en todo el anillo
-        // (el mismo shader sube el brillo del sector elegido)
+        // butacas: los bloques celestes/blancos ORIGINALES del modelo, con el
+        // celeste oficial de Racing (#59B8E6); el shader sólo ilumina el sector
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addSeatStripes(mat); }
+          if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x59b8e6);
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, false); }
         }
-        // las gradas pintadas del cuenco (terrazas de las populares) también van
-        // con las franjas, como en la foto aérea (clonado: los túneles no)
+        // las gradas pintadas del cuenco que quedaban LISAS (terrazas) sí llevan
+        // las franjas radiales, así no hay espacios todo blancos o todo celestes
         if (/Continuous_Terraces/.test(o.name) &&
             (mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE')) {
           o.material = mat.clone();
-          addSeatStripes(o.material);
+          addStandShader(o.material, true);
         }
         // techo: gris grafito arriba (foto aérea); por dentro claro, casi blanco
         if (mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
@@ -467,7 +484,7 @@ function pickSeat(clientX, clientY) {
     }
     const fila = filaAt(p.y);
     const isPop = area.kind === 'popular';
-    const colNum = colNumAt(angle);
+    const colNum = colNumAt(area, angle);
     const butaca = isPop ? 'Gral.' : colNum;
     const sold = !isPop && seatSold(area, fila, colNum); // las populares no se numeran
     let price = area.priceFrom;
@@ -623,11 +640,11 @@ function renderOverview() {
       <span class="area-swatch" style="background:${a.color}"></span>
       <span class="area-info">
         <span class="area-name">${a.name}</span>
-        <span class="area-meta">${a.tier} · desde ${fmtPrice(a.priceFrom)}</span>
+        <span class="area-meta">${a.tier} · ${fmtNum(a.cap)} lugares · desde ${fmtPrice(a.priceFrom)}</span>
       </span>
     </button>`).join('');
   sheetContent.innerHTML = `
-    <div class="sheet-kicker">Paso 1 de 2</div>
+    <div class="sheet-kicker">Paso 1 de 2 · ${fmtNum(CAPACITY)} lugares</div>
     <div class="sheet-title">Elegí tu sector</div>
     <div class="sheet-sub">Tocá una tribuna para acercarte. Movete con las flechas o el joystick, arrastrá para mirar y hacé zoom con la rueda o pellizcando.</div>
     <div class="area-grid">${cards}</div>`;
@@ -680,7 +697,7 @@ function seatCardHTML(seat, inSeat) {
     : (sold ? `<div class="seat-desc"><b>Esta butaca ya está ocupada</b>, no se puede reservar. Podés verla igual o elegir otra.</div>` : '');
   return `
     <div class="seat-head">
-      <span class="seat-accent" style="background:${a.color};color:${a.color}"></span>
+      <span class="seat-accent"></span>
       <span class="seat-head-txt"><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
       ${soldTag}
     </div>
@@ -689,6 +706,7 @@ function seatCardHTML(seat, inSeat) {
       ${metaLabel(seat)}
       <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
     </div>
+    <div class="cap-note">${fmtNum(a.cap)} lugares en este sector · ${fmtNum(CAPACITY)} en todo el Cilindro</div>
     ${note}
     <div class="row-actions">${actions}</div>`;
 }

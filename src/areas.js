@@ -12,13 +12,19 @@
 export const PITCH_CENTER = { x: 3.8, y: 1.2, z: 3.6 };
 export const HIGH_Y = 10.5; // límite entre bandeja baja y alta
 
+// Capacidad real del Cilindro: 51.389 espectadores sentados.
+// Los `cap` por sector son un reparto estimado que suma exacto ese total.
+export const CAPACITY = 51389;
+
 export const fmtPrice = (n) =>
   '$' + Math.round(n).toLocaleString('es-AR', { maximumFractionDigits: 0 });
+export const fmtNum = (n) => Math.round(n).toLocaleString('es-AR');
 
 // kind: 'platea' (numerada) | 'popular' (general)
 export const AREAS = [
   {
     id: 'popular-sur',
+    cap: 12000,
     name: 'Popular Sur',
     tier: 'Cabecera Sur · Local',
     kind: 'popular',
@@ -30,6 +36,7 @@ export const AREAS = [
   },
   {
     id: 'popular-norte',
+    cap: 10000,
     name: 'Popular Norte',
     tier: 'Cabecera Norte · Visitante',
     kind: 'popular',
@@ -41,6 +48,7 @@ export const AREAS = [
   },
   {
     id: 'platea-a',
+    cap: 6500,
     name: 'Platea A',
     tier: 'Lateral · Preferencial',
     kind: 'platea',
@@ -52,6 +60,7 @@ export const AREAS = [
   },
   {
     id: 'platea-b',
+    cap: 6500,
     name: 'Platea B',
     tier: 'Lateral Este',
     kind: 'platea',
@@ -63,6 +72,7 @@ export const AREAS = [
   },
   {
     id: 'platea-c',
+    cap: 3800,
     name: 'Platea C',
     tier: 'Codo Sudeste',
     kind: 'platea',
@@ -74,6 +84,7 @@ export const AREAS = [
   },
   {
     id: 'platea-damas',
+    cap: 3800,
     name: 'Platea Damas',
     tier: 'Codo Sur · Puerta 5',
     kind: 'platea',
@@ -85,6 +96,7 @@ export const AREAS = [
   },
   {
     id: 'platea-e',
+    cap: 4500,
     name: 'Platea E',
     tier: 'Bandeja Alta · detrás del arco local',
     kind: 'platea',
@@ -96,6 +108,7 @@ export const AREAS = [
   },
   {
     id: 'platea-d',
+    cap: 4289,
     name: 'Platea D',
     tier: 'Bandeja Alta · Norte',
     kind: 'platea',
