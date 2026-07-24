@@ -237,7 +237,14 @@ function seatSold(area, fila, colNum) {
   const salt = AREAS.indexOf(area) + 1;
   let h = (Math.imul(fila * salt, 73856093) ^ Math.imul(colNum + 1, 19349663)) >>> 0;
   h = (h ^ (h >>> 13)) >>> 0;
-  return (h % 100) < 28; // ~28% ocupadas
+  return (h % 100) < occPct(area); // acorde a la ocupación del sector
+}
+// Ocupación simulada del sector (determinística, 30–70%): se muestra en las
+// cards para que la demo se sienta como una venta real.
+function occPct(area) {
+  let h = 0;
+  for (const c of area.id) h = ((h * 31) + c.charCodeAt(0)) >>> 0;
+  return 30 + (h % 41);
 }
 
 /* ====================================================== Resaltado de área == */
@@ -330,20 +337,18 @@ gltfLoader.load(
     modelRoot = gltf.scene;
     modelRoot.traverse((o) => {
       if (!o.isMesh) return;
+      // bloques "Exterior" decorativos sueltos (quedan flotando fuera del
+      // estadio): no van
+      if (/^Stadium_Exterior/.test(o.name)) { o.visible = false; return; }
       o.castShadow = true;
       o.receiveShadow = true;
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas celestes: bloques del modelo con el ruido exacto del .blend
-        // (dentro de las populares van pintadas con franjas, no como butacas)
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'primary'); }
-        }
-        // butacas blancas: en las plateas quedan como bloques del modelo; en la
-        // zona popular van pintadas con franjas (ahí no hay butacas)
-        if (mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'secondary'); }
+        // TODA la tribuna pintada con las franjas celestes/blancas (con la
+        // textura de ruido del blend adentro de cada franja)
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'stripes'); }
         }
         // gradas/terrazas de parado y paredones del cuenco: también pintados
         // con franjas (clonado para no afectar a los túneles)
@@ -690,7 +695,8 @@ function renderOverview() {
       <span class="area-swatch" style="background:${a.color}"></span>
       <span class="area-info">
         <span class="area-name">${a.name}</span>
-        <span class="area-meta">${a.tier} · ${fmtNum(a.cap)} lugares · desde ${fmtPrice(a.priceFrom)}</span>
+        <span class="area-meta">${a.tier} · desde ${fmtPrice(a.priceFrom)}</span>
+        <span class="area-occ"><span class="area-occ-bar"><i style="width:${occPct(a)}%"></i></span>${occPct(a)}% ocupado</span>
       </span>
     </button>`).join('');
   sheetContent.innerHTML = `
@@ -734,7 +740,10 @@ function metaLabel(seat) {
 function seatCardHTML(seat, inSeat) {
   const a = seat.area;
   const sold = seat.sold;
-  const soldTag = sold ? `<span class="tag-sold">Ocupada</span>` : '';
+  const isPop = seat.kind === 'popular';
+  const tag = sold
+    ? `<span class="tag-sold">● Ocupada</span>`
+    : `<span class="tag-free">● Disponible</span>`;
   const grabBtn = sold
     ? `<button class="btn btn-off" id="seat-grab" disabled>Butaca ocupada</button>`
     : `<button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>`;
@@ -744,19 +753,23 @@ function seatCardHTML(seat, inSeat) {
        <button class="btn btn-primary" id="go-view">Ver desde acá</button>`;
   const note = inSeat
     ? `<div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda o el pellizco para acercar.</b></div>`
-    : (sold ? `<div class="seat-desc"><b>Esta butaca ya está ocupada</b>, no se puede reservar. Podés verla igual o elegir otra.</div>` : '');
+    : (sold ? `<div class="seat-desc"><b>Esta butaca ya está comprada por otro socio</b>, no se puede reservar. Podés verla igual o elegir otra.</div>` : '');
+  const pct = occPct(a);
   return `
     <div class="seat-head">
       <span class="seat-accent"></span>
       <span class="seat-head-txt"><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
-      ${soldTag}
+      ${isPop && !sold ? '' : tag}
     </div>
     <div class="seat-meta">
       <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
       ${metaLabel(seat)}
       <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
     </div>
-    <div class="cap-note">${fmtNum(a.cap)} lugares en este sector · ${fmtNum(CAPACITY)} en todo el Cilindro</div>
+    <div class="cap-note">
+      <span class="area-occ-bar wide"><i style="width:${pct}%"></i></span>
+      <span>${pct}% ocupado · ${fmtNum(a.cap)} lugares en el sector · ${fmtNum(CAPACITY)} en el Cilindro</span>
+    </div>
     ${note}
     <div class="row-actions">${actions}</div>`;
 }

@@ -241,8 +241,9 @@ html, body {
 .meta-v { display: block; font-family: var(--font-display); font-weight: 800; font-size: 16px; color: var(--racing-negro); }
 .seat-desc { font-size: 12.5px; line-height: 1.5; color: #3c4b56; margin-bottom: 14px; }
 .cap-note {
+  display: flex; align-items: center; gap: 9px;
   font-size: 11px; color: #56707f; margin: 0 0 12px;
-  padding-top: 8px; border-top: 1px solid rgba(26, 26, 26, 0.14);
+  padding-top: 9px; border-top: 1px solid rgba(26, 26, 26, 0.14);
 }
 .row-actions { display: flex; gap: 9px; }
 .row-actions .btn { flex: 1; text-align: center; }
@@ -309,8 +310,15 @@ html, body {
 
 .seat-head-txt { min-width: 0; }
 .tag-sold { margin-left: auto; align-self: center; font-size: 11px; font-weight: 700; white-space: nowrap; color: #c8281c; background: rgba(255, 68, 54, 0.1); border: 1px solid rgba(200, 40, 28, 0.45); padding: 4px 10px; border-radius: 99px; }
+.tag-free { margin-left: auto; align-self: center; font-size: 11px; font-weight: 700; white-space: nowrap; color: #157a3f; background: rgba(38, 179, 98, 0.1); border: 1px solid rgba(21, 122, 63, 0.4); padding: 4px 10px; border-radius: 99px; }
 .btn-off { cursor: not-allowed; }
 .btn-off:active { transform: none; }
+
+/* ocupación (demo) en cards */
+.area-occ { display: flex; align-items: center; gap: 7px; font-size: 10.5px; color: #56707f; margin-top: 4px; }
+.area-occ-bar { flex: 0 0 54px; height: 5px; border-radius: 99px; background: rgba(26, 26, 26, 0.1); overflow: hidden; }
+.area-occ-bar.wide { flex: 0 0 76px; }
+.area-occ-bar i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--racing-cel), #2f93d2); }
 
 /* Desktop: floating panel instead of full-width sheet */
 @media (min-width: 720px) {
