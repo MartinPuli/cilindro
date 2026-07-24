@@ -221,10 +221,14 @@ function areaView(area) {
 
 const bowlRadiusAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
 const filaAt = (y) => THREE.MathUtils.clamp(Math.round((y - 1.6) / 0.42) + 1, 1, 58);
-function colAt(area, angle) {
-  return area.kind === 'popular'
-    ? 'Gral.'
-    : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214); // butaca numerada
+const colNumAt = (angle) => 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214); // butaca numerada
+// Algunas butacas ya están ocupadas (ejemplo, sin marcarlas en el 3D): no se
+// pueden reservar. Es determinístico, así una misma butaca siempre da igual.
+function seatSold(area, fila, colNum) {
+  const salt = AREAS.indexOf(area) + 1;
+  let h = (Math.imul(fila * salt, 73856093) ^ Math.imul(colNum + 1, 19349663)) >>> 0;
+  h = (h ^ (h >>> 13)) >>> 0;
+  return (h % 100) < 28; // ~28% ocupadas
 }
 
 /* ====================================================== Resaltado de área == */
@@ -507,10 +511,12 @@ function pickSeat(clientX, clientY) {
     }
     const fila = filaAt(p.y);
     const isPop = area.kind === 'popular';
-    const butaca = isPop ? 'Gral.' : colAt(area, angle);
+    const colNum = colNumAt(angle);
+    const butaca = isPop ? 'Gral.' : colNum;
+    const sold = !isPop && seatSold(area, fila, colNum); // las populares no se numeran
     let price = area.priceFrom;
     if (!isPop) price = area.priceFrom * (1 + Math.max(0, 18 - fila) * 0.02);
-    pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind };
+    pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind, sold };
     marker.position.copy(p);
     marker.visible = true;
     renderArea(area, pendingSeat);
@@ -704,18 +710,23 @@ function metaLabel(seat) {
 }
 function seatCardHTML(seat, inSeat) {
   const a = seat.area;
+  const sold = seat.sold;
+  const soldTag = sold ? `<span class="tag-sold">Ocupada</span>` : '';
+  const grabBtn = sold
+    ? `<button class="btn btn-off" id="seat-grab" disabled>Butaca ocupada</button>`
+    : `<button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>`;
   const actions = inSeat
-    ? `<button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>
-       <button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>`
+    ? `<button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>${grabBtn}`
     : `<button class="btn btn-ghost" id="re-pick">Otro lugar</button>
        <button class="btn btn-primary" id="go-view">Ver desde acá</button>`;
   const note = inSeat
     ? `<div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda o el pellizco para acercar.</b></div>`
-    : '';
+    : (sold ? `<div class="seat-desc"><b>Esta butaca ya está ocupada</b>, no se puede reservar. Podés verla igual o elegir otra.</div>` : '');
   return `
     <div class="seat-head">
       <span class="seat-accent" style="background:${a.color};color:${a.color}"></span>
       <span class="seat-head-txt"><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
+      ${soldTag}
     </div>
     <div class="seat-meta">
       <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
@@ -729,7 +740,8 @@ function wireSeatCard(seat, inSeat) {
   const a = seat.area;
   if (inSeat) {
     sheetContent.querySelector('#seat-change').addEventListener('click', () => goArea(a));
-    sheetContent.querySelector('#seat-grab').addEventListener('click', () => toast(`¡Lugar en ${a.name} reservado! 🔵⚪`));
+    const grab = sheetContent.querySelector('#seat-grab');
+    if (!seat.sold) grab.addEventListener('click', () => toast(`¡Lugar en ${a.name} reservado! 🔵⚪`));
   } else {
     sheetContent.querySelector('#go-view').addEventListener('click', () => goSeat(pendingSeat));
     sheetContent.querySelector('#re-pick').addEventListener('click', () => {
