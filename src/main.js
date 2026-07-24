@@ -21,7 +21,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMappingExposure = 0.93;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -140,10 +140,10 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 /* ============================================================ Luces ======== */
-const hemi = new THREE.HemisphereLight(0xd6ecfa, 0x45543f, 1.05);
+const hemi = new THREE.HemisphereLight(0xd6ecfa, 0x45543f, 0.88);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff4e2, 2.5);
+const sun = new THREE.DirectionalLight(0xfff4e2, 2.05);
 sun.position.set(115, 155, 70);
 sun.target.position.copy(STADIUM_CENTER);
 sun.castShadow = true;
@@ -181,10 +181,10 @@ function applyDayNight(night) {
     floodGroup.children.forEach((f) => (f.intensity = 900));
   } else {
     scene.background = SKY.day; scene.fog.color.set(0xcfe6f5); scene.environmentIntensity = 0.4;
-    hemi.color.set(0xd6ecfa); hemi.groundColor.set(0x45543f); hemi.intensity = 1.05;
-    sun.color.set(0xfff4e2); sun.intensity = 2.5;
+    hemi.color.set(0xd6ecfa); hemi.groundColor.set(0x45543f); hemi.intensity = 0.88;
+    sun.color.set(0xfff4e2); sun.intensity = 2.05;
     groundMat.color.set(0xffffff);
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 0.93;
     floodGroup.children.forEach((f) => (f.intensity = 0));
   }
 }
