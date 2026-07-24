@@ -36,7 +36,7 @@ camera.lookAt(STADIUM_CENTER);
    fija (sólo se gira la cabeza). */
 const view = { pos: OVERVIEW_POS.clone(), yaw: 0, pitch: 0, fov: 46 };
 const keys = new Set();
-const joy = { x: 0, y: 0 };
+const joy = { x: 0, y: 0, up: 0 };
 let autoOrbit = false;
 
 function aimView(pos, look) {
@@ -50,13 +50,22 @@ function viewDir() {
   return new THREE.Vector3(Math.sin(view.yaw) * cp, Math.sin(view.pitch), Math.cos(view.yaw) * cp);
 }
 function clampPos() {
-  view.pos.y = THREE.MathUtils.clamp(view.pos.y, 2.5, 135);
   const dx = view.pos.x - STADIUM_CENTER.x, dz = view.pos.z - STADIUM_CENTER.z;
   const r = Math.hypot(dx, dz);
-  if (r > 440) { const s = 440 / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
+  if (mode === 'area') {
+    // dentro de un sector te movés DENTRO del cuenco: no te vas a la calle ni
+    // volás sobre el techo, así se siente como caminar por el estadio.
+    view.pos.y = THREE.MathUtils.clamp(view.pos.y, 3, 40);
+    const maxR = 96;
+    if (r > maxR) { const s = maxR / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
+  } else {
+    // vista aérea: recorrido amplio alrededor del estadio
+    view.pos.y = THREE.MathUtils.clamp(view.pos.y, 2.5, 135);
+    if (r > 440) { const s = 440 / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
+  }
 }
 function applyMove(dt) {
-  let mx = joy.x, my = joy.y, uy = 0;
+  let mx = joy.x, my = joy.y, uy = joy.up;
   if (keys.has('w') || keys.has('arrowup')) my += 1;
   if (keys.has('s') || keys.has('arrowdown')) my -= 1;
   if (keys.has('d') || keys.has('arrowright')) mx += 1;
@@ -103,28 +112,23 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 scene.environmentIntensity = 0.4;
 
-/* Suelo: pasto alrededor del estadio que se transforma en ciudad hacia afuera */
+/* Suelo: sólo pasto verde alrededor del estadio (sin edificios ni ciudad) */
 function makeGroundTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 1024;
   const x = c.getContext('2d');
-  const g = x.createRadialGradient(512, 512, 60, 512, 512, 512);
-  g.addColorStop(0.0, '#3a5740');
-  g.addColorStop(0.16, '#3e5c43');
-  g.addColorStop(0.24, '#6e6857');
-  g.addColorStop(0.55, '#6a655a');
-  g.addColorStop(1.0, '#4c4842');
-  x.fillStyle = g;
+  x.fillStyle = '#4b7d44';
   x.fillRect(0, 0, 1024, 1024);
-  // trama de calles sutil
-  x.strokeStyle = 'rgba(25,24,20,0.13)';
-  x.lineWidth = 3;
-  for (let p = 96; p < 1024; p += 96) {
-    x.beginPath(); x.moveTo(p, 0); x.lineTo(p, 1024); x.stroke();
-    x.beginPath(); x.moveTo(0, p); x.lineTo(1024, p); x.stroke();
+  // manchas suaves para que el pasto no quede plano
+  for (let i = 0; i < 1600; i++) {
+    const px = Math.random() * 1024, py = Math.random() * 1024, rr = 7 + Math.random() * 44;
+    x.fillStyle = Math.random() < 0.5 ? 'rgba(92,132,74,0.10)' : 'rgba(44,74,40,0.10)';
+    x.beginPath(); x.arc(px, py, rr, 0, Math.PI * 2); x.fill();
   }
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(7, 7);
   t.anisotropy = 4;
   return t;
 }
@@ -134,43 +138,6 @@ ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.02;
 ground.receiveShadow = true;
 scene.add(ground);
-
-/* Barrio bajo alrededor del estadio (sutil, se desvanece con la niebla) */
-(function buildNeighborhood() {
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0 });
-  const MAX = 300;
-  const inst = new THREE.InstancedMesh(geo, mat, MAX);
-  inst.castShadow = true;
-  inst.receiveShadow = true;
-  const m = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), scl = new THREE.Vector3(), col = new THREE.Color();
-  const palette = ['#9c988e', '#b3aa96', '#8f938d', '#a7a199', '#82817a', '#b8b1a0', '#767b7d'];
-  const block = 30;
-  let i = 0;
-  for (let gx = -9; gx <= 9; gx++) {
-    for (let gz = -9; gz <= 9; gz++) {
-      if (i >= MAX) break;
-      const cx = PITCH.x + gx * block + (Math.random() - 0.5) * 11;
-      const cz = PITCH.z + gz * block + (Math.random() - 0.5) * 11;
-      const r = Math.hypot(cx - PITCH.x, cz - PITCH.z);
-      if (r < 122 || r > 250) continue;      // libre el estadio; anillo de ~4 manzanas
-      if (Math.random() < 0.14) continue;    // huecos: plazas, calles, baldíos
-      const w = 11 + Math.random() * 16;
-      const d = 11 + Math.random() * 16;
-      const h = 4 + Math.random() * Math.random() * 22; // mayoría bajos
-      pos.set(cx, h / 2 - 0.02, cz);
-      scl.set(w, h, d);
-      m.compose(pos, q, scl);
-      inst.setMatrixAt(i, m);
-      col.set(palette[(Math.random() * palette.length) | 0]).multiplyScalar(0.82 + Math.random() * 0.3);
-      inst.setColorAt(i, col);
-      i++;
-    }
-  }
-  inst.count = i;
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
-})();
 
 /* ============================================================ Luces ======== */
 const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x45543f, 0.85);
@@ -224,16 +191,19 @@ function applyDayNight(night) {
 
 /* ============================================================ Marcador ===== */
 const marker = new THREE.Group();
+const markerMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ec, emissive: 0x2f9fe0, emissiveIntensity: 1.4, roughness: 0.4 });
 {
-  const ringGeo = new THREE.TorusGeometry(1.05, 0.18, 10, 28);
-  const ringMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ec, emissive: 0x2f9fe0, emissiveIntensity: 1.4, roughness: 0.4 });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.18, 10, 28), markerMat);
   ring.rotation.x = Math.PI / 2;
-  const pinGeo = new THREE.ConeGeometry(0.5, 1.6, 16);
-  const pin = new THREE.Mesh(pinGeo, ringMat);
+  const pin = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.6, 16), markerMat);
   pin.position.y = 1.7;
   pin.rotation.x = Math.PI;
   marker.add(ring, pin);
+}
+// pinta el marcador según disponibilidad (celeste = libre, rojo = ocupada)
+function setMarkerSold(sold) {
+  markerMat.color.setHex(sold ? 0xff5a4d : 0x6ec6ec);
+  markerMat.emissive.setHex(sold ? 0xd21d10 : 0x2f9fe0);
 }
 marker.visible = false;
 scene.add(marker);
@@ -250,20 +220,83 @@ function areaView(area) {
   return { pos, look, fov };
 }
 
-// Panel celeste translúcido que marca la tribuna seleccionada sobre el cuenco.
+/* ============================ Entradas vendidas (simulación en rojo) ======== */
+const FORWARD = new THREE.Vector3(0, 0, 1);
+const reserved = new Set();          // butacas reservadas en esta sesión (demo)
+let lastOcc = { sold: 0, total: 0 }; // ocupación del sector activo (para la card)
+const bowlRadiusAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
+const filaAt = (y) => THREE.MathUtils.clamp(Math.round((y - 1.6) / 0.42) + 1, 1, 58);
+function colAt(area, angle) {
+  return area.kind === 'popular'
+    ? Math.round((angle + Math.PI) * 6)                       // columnas anchas (popular)
+    : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214); // butaca numerada
+}
+function seatKey(area, fila, col) { return `${area.id}:${fila}:${col}`; }
+function seatSold(area, fila, col) {
+  if (reserved.has(seatKey(area, fila, col))) return true;    // ya reservada (demo)
+  const salt = AREAS.indexOf(area) + 1;
+  let h = (Math.imul(fila * salt, 73856093) ^ Math.imul(col + 1, 19349663)) >>> 0;
+  h = (h ^ (h >>> 13)) >>> 0;
+  return (h % 100) < 40;                                      // ~40% ya vendidas
+}
+
+// Discos rojos sobre las butacas ya compradas del sector activo.
+let soldHL = null;
+function showSoldSeats(area) {
+  hideSoldSeats();
+  const span = area.kind === 'popular' ? 1.5 : 1.15;
+  const lo = area.band === 'high' ? 11 : 2.2;
+  const hi = area.band === 'low' ? 10 : 18.5;
+  const nA = 26, nY = 14;
+  const geo = new THREE.CircleGeometry(0.5, 10);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xff4436, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
+  const inst = new THREE.InstancedMesh(geo, mat, nA * nY);
+  const m = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), scl = new THREE.Vector3(1, 1, 1), dir = new THREE.Vector3();
+  let i = 0, total = 0;
+  for (let ai = 0; ai < nA; ai++) {
+    const th = area.ang - span / 2 + span * (ai + 0.5) / nA;
+    const col = colAt(area, th);
+    for (let yi = 0; yi < nY; yi++) {
+      const y = lo + (hi - lo) * (yi + 0.5) / nY;
+      total++;
+      if (!seatSold(area, filaAt(y), col)) continue;
+      const r = bowlRadiusAt(y) - 0.5;
+      pos.set(PITCH.x + Math.cos(th) * r, y, PITCH.z + Math.sin(th) * r);
+      dir.set(PITCH.x - pos.x, 0, PITCH.z - pos.z).normalize();
+      q.setFromUnitVectors(FORWARD, dir);
+      m.compose(pos, q, scl);
+      inst.setMatrixAt(i++, m);
+    }
+  }
+  inst.count = i;
+  inst.instanceMatrix.needsUpdate = true;
+  inst.renderOrder = 2;
+  lastOcc = { sold: i, total };
+  soldHL = inst;
+  scene.add(inst);
+}
+function hideSoldSeats() {
+  if (!soldHL) return;
+  scene.remove(soldHL);
+  soldHL.geometry.dispose();
+  soldHL.material.dispose();
+  soldHL = null;
+}
+
+/* ====================================================== Resaltado de área == */
+// Al tocar una tribuna, ésta se ILUMINA en celeste (glow suave + borde brillante).
 let areaHL = null;
 function showAreaHighlight(area) {
   hideAreaHighlight();
   const thetaLen = area.kind === 'popular' ? 1.55 : 1.2;
   const thetaStart = (Math.PI / 2 - area.ang) - thetaLen / 2; // convención CylinderGeometry
-  // rango de altura según la banda del sector (baja / alta / toda)
   const lo = area.band === 'high' ? 10.5 : 1;
   const hi = area.band === 'low' ? 10.5 : 20;
-  const rAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
+  const rAt = bowlRadiusAt;
   const g = new THREE.Group();
-  // glow amarillo suave sobre la tribuna (no tapa los asientos)
+  // luz celeste suave sobre la tribuna (la "alumbra", no tapa los asientos)
   const fillMat = new THREE.MeshBasicMaterial({
-    color: 0xffcf3a, transparent: true, opacity: 0.12,
+    color: 0x35bdff, transparent: true, opacity: 0.16,
     side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const fill = new THREE.Mesh(
@@ -271,8 +304,8 @@ function showAreaHighlight(area) {
   fill.position.set(PITCH.x, (lo + hi) / 2, PITCH.z);
   // borde brillante en el tope de la banda: marca clara y prolija del sector
   const bandMat = new THREE.MeshBasicMaterial({
-    color: 0xffe36b, transparent: true, opacity: 0.7,
-    side: THREE.DoubleSide, depthWrite: false,
+    color: 0x9fe6ff, transparent: true, opacity: 0.8,
+    side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const band = new THREE.Mesh(
     new THREE.CylinderGeometry(rAt(hi + 1.3), rAt(hi - 1.3), 2.4, 48, 1, true, thetaStart, thetaLen), bandMat);
@@ -281,8 +314,10 @@ function showAreaHighlight(area) {
   g.userData = { fillMat, bandMat };
   areaHL = g;
   scene.add(areaHL);
+  showSoldSeats(area);
 }
 function hideAreaHighlight() {
+  hideSoldSeats();
   if (!areaHL) return;
   scene.remove(areaHL);
   areaHL.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
@@ -332,10 +367,19 @@ gltfLoader.load(
         if (mat.name === 'BLK_STADIUM_BARRIER') {
           mat.metalness = 0.45; mat.roughness = 0.5; mat.color.setHex(0x8b96a0);
         }
-        // rayado del corte de césped: la mitad alterna, un verde más oscuro
-        if (mat.name === 'BLK_STADIUM_TURF' && /Alternate/.test(o.name)) {
-          o.material = mat.clone();
-          o.material.color.multiplyScalar(0.82);
+        // hormigón de palcos/cabinas/estructura: gris claro MATE (así no se
+        // "quema" en blanco brillante ni parece vidrio bajo el sol)
+        if (mat.name === 'BLK_STADIUM_FACADE') { mat.color.setHex(0xbcc1c6); mat.roughness = 0.9; mat.metalness = 0; }
+        // los pasillos/escaleras blancos, un pelín menos encandiladores
+        if (mat.name === 'BLK_STADIUM_SAFETY') mat.color.setHex(0xc2c7cb);
+        // vidrios de verdad (ventanales y frente de palcos): azulados y
+        // reflejan el cielo (baja rugosidad), no negros opacos
+        if (mat.name === 'BLK_STADIUM_FACADE_GLASS') { mat.color.setHex(0x244f6e); mat.metalness = 0.35; mat.roughness = 0.08; }
+        if (mat.name === 'BLK_STADIUM_PALCO') { mat.color.setHex(0x162838); mat.metalness = 0.3; mat.roughness = 0.12; }
+        // césped: verde más vivo, con el corte alternado un tono más oscuro
+        if (mat.name === 'BLK_STADIUM_TURF') {
+          mat.color.setHex(0x3f8f39); mat.roughness = 0.85;
+          if (/Alternate/.test(o.name)) { o.material = mat.clone(); o.material.color.setHex(0x347c30); }
         }
       }
       raycastTargets.push(o);
@@ -465,13 +509,16 @@ function pickSeat(clientX, clientY) {
       showAreaHighlight(area);
       setModeTag(area.name);
     }
-    const fila = THREE.MathUtils.clamp(Math.round((p.y - 1.6) / 0.42) + 1, 1, 58);
+    const fila = filaAt(p.y);
     const isPop = area.kind === 'popular';
-    const butaca = isPop ? 'Gral.' : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214);
+    const col = colAt(area, angle);
+    const butaca = isPop ? 'Gral.' : col;
+    const sold = seatSold(area, fila, col);
     let price = area.priceFrom;
     if (!isPop) price = area.priceFrom * (1 + Math.max(0, 18 - fila) * 0.02);
-    pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind };
+    pendingSeat = { point: p.clone(), area, fila, butaca, col, price, kind: area.kind, sold };
     marker.position.copy(p);
+    setMarkerSold(sold);
     marker.visible = true;
     renderArea(area, pendingSeat);
     return;
@@ -555,11 +602,13 @@ const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in win
 let joyId = null;
 function resetKnob() { joy.x = 0; joy.y = 0; joyKnob.style.transform = 'translate(-50%,-50%)'; }
 function updateJoy() {
-  // el joystick aparece en el celu cuando estás dentro de un sector (para
-  // caminar y acercarte a las butacas); en la vista aérea elegís de la lista.
-  const show = isTouch && mode === 'area';
-  joyEl.style.display = show ? 'block' : 'none';
-  if (!show) { joyId = null; resetKnob(); }
+  // el joystick (celu) para caminar y los botones subir/bajar aparecen cuando
+  // estás dentro de un sector; en la vista aérea elegís de la lista.
+  const inArea = mode === 'area';
+  joyEl.style.display = (isTouch && inArea) ? 'block' : 'none';
+  udEl.style.display = inArea ? 'flex' : 'none';
+  if (!(isTouch && inArea)) { joyId = null; resetKnob(); }
+  if (!inArea) joy.up = 0;
 }
 function joyMove(e) {
   const r = joyEl.getBoundingClientRect();
@@ -583,6 +632,22 @@ joyEl.addEventListener('pointermove', (e) => { if (e.pointerId === joyId) joyMov
 function joyEnd(e) { if (e.pointerId === joyId) { joyId = null; resetKnob(); } }
 joyEl.addEventListener('pointerup', joyEnd);
 joyEl.addEventListener('pointercancel', joyEnd);
+
+/* ---- Botones Subir / Bajar (para moverte en altura dentro del sector) ------ */
+const udEl = document.createElement('div');
+udEl.id = 'updown';
+udEl.innerHTML = '<button id="ud-up" aria-label="Subir">▲</button><button id="ud-down" aria-label="Bajar">▼</button>';
+document.body.appendChild(udEl);
+function holdVert(btn, dir) {
+  const on = (e) => { e.preventDefault(); joy.up = dir; autoOrbit = false; btn.classList.add('on'); try { btn.setPointerCapture(e.pointerId); } catch (_) {} };
+  const off = () => { if (joy.up === dir) joy.up = 0; btn.classList.remove('on'); };
+  btn.addEventListener('pointerdown', on);
+  btn.addEventListener('pointerup', off);
+  btn.addEventListener('pointercancel', off);
+  btn.addEventListener('pointerleave', off);
+}
+holdVert(udEl.querySelector('#ud-up'), 1);
+holdVert(udEl.querySelector('#ud-down'), -1);
 
 /* ============================================================ UI ============ */
 const sheet = document.getElementById('sheet');
@@ -628,52 +693,81 @@ function renderArea(area, seat) {
       </div>`;
     return;
   }
-  const seatLabel = seat.kind === 'popular'
-    ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`
-    : `<div class="meta-item"><span class="meta-k">Butaca</span><span class="meta-v">${seat.butaca}</span></div>`;
-  sheetContent.innerHTML = `
-    <div class="seat-head">
-      <span class="seat-accent" style="background:${area.color};color:${area.color}"></span>
-      <span><span class="seat-name">${area.name}</span><span class="seat-tier">${area.tier}</span></span>
-    </div>
-    <div class="seat-meta">
-      <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
-      ${seatLabel}
-      <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
-    </div>
-    <div class="row-actions">
-      <button class="btn btn-ghost" id="re-pick">Otro lugar</button>
-      <button class="btn btn-primary" id="go-view">Ver desde acá</button>
-    </div>`;
-  sheetContent.querySelector('#go-view').addEventListener('click', () => goSeat(pendingSeat));
-  sheetContent.querySelector('#re-pick').addEventListener('click', () => {
-    pendingSeat = null; marker.visible = false; renderArea(area);
-  });
+  sheetContent.innerHTML = seatCardHTML(seat, false);
+  wireSeatCard(seat, false);
 }
 
 function renderSeat(seat) {
   untuck();
-  const a = seat.area;
-  const seatLabel = seat.kind === 'popular'
+  sheetContent.innerHTML = seatCardHTML(seat, true);
+  wireSeatCard(seat, true);
+}
+
+// Card compartida: paso de confirmación (inSeat=false) y vista desde la butaca
+// (inSeat=true). Muestra disponibilidad (verde/rojo) y la ocupación del sector.
+function metaLabel(seat) {
+  return seat.kind === 'popular'
     ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`
     : `<div class="meta-item"><span class="meta-k">Butaca</span><span class="meta-v">${seat.butaca}</span></div>`;
-  sheetContent.innerHTML = `
-    <div class="seat-head">
-      <span class="seat-accent" style="background:${a.color};color:${a.color}"></span>
-      <span><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
+}
+function seatCardHTML(seat, inSeat) {
+  const a = seat.area;
+  const sold = seat.sold;
+  const pct = lastOcc.total ? Math.round((lastOcc.sold / lastOcc.total) * 100) : 0;
+  const badge = sold
+    ? `<span class="avail-badge sold">● Ocupada</span>`
+    : `<span class="avail-badge free">● Disponible</span>`;
+  const actions = inSeat
+    ? `<button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>
+       <button class="btn ${sold ? 'btn-disabled' : 'btn-primary'}" id="seat-grab" ${sold ? 'disabled' : ''}>${sold ? 'Ocupada' : 'Reservar (demo)'}</button>`
+    : `<button class="btn btn-ghost" id="re-pick">Otro lugar</button>
+       <button class="btn ${sold ? 'btn-warn' : 'btn-primary'}" id="go-view">${sold ? 'Ver igual' : 'Ver desde acá'}</button>`;
+  const note = inSeat
+    ? `<div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda o el pellizco para acercar.</b></div>`
+    : (sold
+        ? `<div class="seat-desc sold-note">Esta butaca ya está <b>comprada</b>. Elegí una de las que están en celeste (libres).</div>`
+        : '');
+  return `
+    <div class="seat-head ${sold ? 'is-sold' : ''}">
+      <span class="seat-accent" style="background:${sold ? '#ff4436' : a.color};color:${sold ? '#ff4436' : a.color}"></span>
+      <span class="seat-head-txt"><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
+      ${badge}
+    </div>
+    <div class="occ-row">
+      <div class="occ-bar"><span style="width:${pct}%"></span></div>
+      <span class="occ-txt">${pct}% ocupado</span>
     </div>
     <div class="seat-meta">
       <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
-      ${seatLabel}
+      ${metaLabel(seat)}
       <div class="meta-item"><span class="meta-k">Entrada</span><span class="meta-v">${fmtPrice(seat.price)}</span></div>
     </div>
-    <div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda para acercar.</b></div>
-    <div class="row-actions">
-      <button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>
-      <button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>
-    </div>`;
-  sheetContent.querySelector('#seat-change').addEventListener('click', () => goArea(a));
-  sheetContent.querySelector('#seat-grab').addEventListener('click', () => toast(`¡Lugar en ${a.name} reservado! 🔵⚪`));
+    ${note}
+    <div class="row-actions">${actions}</div>`;
+}
+function wireSeatCard(seat, inSeat) {
+  const a = seat.area;
+  if (inSeat) {
+    sheetContent.querySelector('#seat-change').addEventListener('click', () => goArea(a));
+    const grab = sheetContent.querySelector('#seat-grab');
+    if (!seat.sold) grab.addEventListener('click', () => reserveSeat(seat));
+  } else {
+    sheetContent.querySelector('#go-view').addEventListener('click', () => goSeat(pendingSeat));
+    sheetContent.querySelector('#re-pick').addEventListener('click', () => {
+      pendingSeat = null; marker.visible = false; renderArea(a);
+    });
+  }
+}
+// Reservar (demo): la butaca queda comprada -> se pinta de ROJO y suma a la ocupación.
+function reserveSeat(seat) {
+  const a = seat.area;
+  reserved.add(seatKey(a, seat.fila, seat.col));
+  seat.sold = true;
+  if (pendingSeat) pendingSeat.sold = true;
+  setMarkerSold(true);
+  lastOcc = { sold: lastOcc.sold + 1, total: lastOcc.total }; // reflejar al toque
+  toast(`¡Butaca reservada en ${a.name}! Queda en rojo 🔴`);
+  renderSeat(seat);
 }
 
 backbtn.addEventListener('click', () => {
@@ -721,8 +815,8 @@ function animate() {
   }
   if (areaHL) {
     const p = Math.sin(t * 2.3) * 0.5 + 0.5;
-    areaHL.userData.fillMat.opacity = 0.08 + p * 0.12;
-    areaHL.userData.bandMat.opacity = 0.55 + p * 0.3;
+    areaHL.userData.fillMat.opacity = 0.12 + p * 0.16;
+    areaHL.userData.bandMat.opacity = 0.55 + p * 0.35;
   }
 
   if (tween) {
