@@ -140,7 +140,7 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 /* ============================================================ Luces ======== */
-const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x45543f, 0.85);
+const hemi = new THREE.HemisphereLight(0xd6ecfa, 0x45543f, 1.05);
 scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xfff4e2, 2.5);
@@ -181,7 +181,7 @@ function applyDayNight(night) {
     floodGroup.children.forEach((f) => (f.intensity = 900));
   } else {
     scene.background = SKY.day; scene.fog.color.set(0xcfe6f5); scene.environmentIntensity = 0.4;
-    hemi.color.set(0xbfe3ff); hemi.groundColor.set(0x45543f); hemi.intensity = 0.85;
+    hemi.color.set(0xd6ecfa); hemi.groundColor.set(0x45543f); hemi.intensity = 1.05;
     sun.color.set(0xfff4e2); sun.intensity = 2.5;
     groundMat.color.set(0xffffff);
     renderer.toneMappingExposure = 1.0;
@@ -273,7 +273,7 @@ const raycastTargets = [];
    - siempre: SUBE EL BRILLO de la tribuna del sector elegido, con su propio
      color y el recorte EXACTO del sector (mismo criterio que areaForSeat). */
 const SEAT_STRIPES = 20.0; // pares de franjas en las gradas pintadas
-const SEAT_CEL = new THREE.Color(0x33a0da).convertSRGBToLinear(); // celeste Racing
+const SEAT_CEL = new THREE.Color(0x4fb2e2).convertSRGBToLinear(); // celeste Racing (claro)
 const SEAT_WHT = new THREE.Color(0xeef3f7).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
 function addStandShader(mat, striped) {
@@ -293,7 +293,7 @@ function addStandShader(mat, striped) {
       .replace('#include <common>',
         '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
       .replace('#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.2 + 0.12 * uActPulse);\n    }\n  }');
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.38 + 0.18 * uActPulse);\n    }\n  }');
     // franjas (si corresponde) + FILETE divisorio negro en el límite exacto de
     // cada sector (los límites están cada PI/4, corridos PI/8): separa bien
     // plateas y populares, y coincide con el borde de la iluminación.
@@ -321,9 +321,14 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas: franjas radiales celestes/blancas SIEMPRE (el patrón propio
-        // del modelo traía bloques enteros de un solo color — acá se rayan todos)
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
+        // butacas: los bloques celestes del modelo quedan tal cual (hermosos);
+        // los bloques BLANCOS gigantes se rompen con franjas para que no haya
+        // zonas enteras de un solo color
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
+          mat.color.setHex(0x59b8e6); // celeste oficial
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, false); }
+        }
+        if (mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
           if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, true); }
         }
         // TODA superficie lisa del cuenco (terrazas pintadas, paredones y las
