@@ -271,10 +271,10 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // celeste de Racing más fiel para los asientos (oficial ~#029CDC)
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x2ea3e0);
-        // el Cilindro tiene techo celeste translúcido (en el modelo venía gris)
-        if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x8ec4e2);
+        // asientos celeste vívido como en el estadio real (foto aérea)
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x08a4e8);
+        // el techo real es gris grafito visto desde arriba (no celeste)
+        if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
         // el alambrado del perímetro y de las populares es TRANSPARENTE (se ve la
         // cancha a través, como en la realidad)
         if (mat.name === 'BLK_STADIUM_FENCE' || mat.name === 'BLK_STADIUM_BARRIER') {
@@ -489,8 +489,12 @@ const backText = document.getElementById('backbtn-text');
 function showBack(t) { backText.textContent = t; backbtn.classList.remove('hidden'); }
 function hideBack() { backbtn.classList.add('hidden'); }
 function setModeTag(t) { document.getElementById('mode-tag').textContent = t; }
+// el "handle" colapsa/expande el panel para ver mejor el estadio (sobre todo en el celu)
+function untuck() { sheet.classList.remove('tuck'); }
+document.getElementById('sheet-handle').addEventListener('click', () => sheet.classList.toggle('tuck'));
 
 function renderOverview() {
+  untuck();
   const cards = AREAS.map((a) => `
     <button class="area-card" data-area="${a.id}">
       <span class="area-swatch" style="background:${a.color}"></span>
@@ -510,6 +514,7 @@ function renderOverview() {
 }
 
 function renderArea(area, seat) {
+  untuck();
   if (!seat) {
     sheetContent.innerHTML = `
       <div class="sheet-kicker">Paso 2 de 2 · ${area.name}</div>
@@ -544,6 +549,7 @@ function renderArea(area, seat) {
 }
 
 function renderSeat(seat) {
+  untuck();
   const a = seat.area;
   const seatLabel = seat.kind === 'popular'
     ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`

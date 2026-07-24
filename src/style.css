@@ -153,9 +153,15 @@ html, body {
 }
 #sheet.tuck { transform: translateX(-50%) translateY(calc(100% - 74px)); }
 #sheet-handle {
-  width: 42px; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, 0.28);
-  margin: 4px auto 12px;
+  position: relative;
+  width: 64px; height: 22px; margin: 0 auto 6px; cursor: pointer;
 }
+#sheet-handle::before {
+  content: ''; position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  width: 44px; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, 0.34);
+  transition: background 0.2s ease;
+}
+#sheet-handle:active::before { background: var(--celeste); }
 
 .sheet-title { font-family: var(--font-display); font-weight: 800; font-size: 15px; letter-spacing: 0.4px; }
 .sheet-kicker { font-size: 11.5px; letter-spacing: 1.6px; text-transform: uppercase; color: #8fc0e0; margin-bottom: 3px; }
