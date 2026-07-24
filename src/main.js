@@ -13,7 +13,7 @@ const OVERVIEW_POS = new THREE.Vector3(150, 108, 178);
 const IS_LOCAL = ['localhost', '127.0.0.1', ''].includes(location.hostname);
 const MODEL_URL = IS_LOCAL
   ? './models/RACING_3D.glb'
-  : 'https://cdn.jsdelivr.net/gh/MartinPuli/cilindro@c59dc48f3f2386b738fce4b32dae7c9a631106a5/public/models/RACING_3D.glb';
+  : 'https://cdn.jsdelivr.net/gh/MartinPuli/cilindro@52e41f42dbee578a7d0a0a77f2d1b2c08293ebfe/public/models/RACING_3D.glb';
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -205,7 +205,7 @@ scene.add(marker);
 
 // Estado de iluminación del sector activo (lo usa el shader de las butacas).
 const seatGlow = { active: 0, ang: 0, half: 0.6, ylo: 1, yhi: 21, pulse: 0 };
-let seatShader = null;
+const seatShaders = [];
 
 /* ====================================================== Resaltado de área == */
 // Cámara para encuadrar una tribuna (desde el campo, por debajo del techo,
@@ -285,21 +285,15 @@ const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
 
-/* Franjas de las tribunas: teñimos el material de los asientos por posición, con
-   franjas RADIALES (verticales) celestes y blancas alrededor del anillo, como en
-   la foto aérea real del Cilindro. El mismo shader ilumina la tribuna elegida. */
-const SEAT_STRIPES = 20.0; // franjas celestes (y otras tantas blancas) alrededor
-const SEAT_CEL = new THREE.Color(0x33a8e0).convertSRGBToLinear();
-const SEAT_WHT = new THREE.Color(0xeef3f7).convertSRGBToLinear();
+/* Las franjas celestes y blancas de las tribunas vienen del PROPIO modelo
+   (butacas primarias celestes + secundarias blancas, como el estadio real).
+   Acá sólo agregamos un shader de ILUMINACIÓN: realza en celeste la tribuna
+   del sector elegido, sin tocar los colores originales. */
 const SEAT_GLOWC = new THREE.Color(0x3fc0ff).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-let stripedSeatMat = null;
-function makeStripedSeatMat(base) {
-  const m = base.clone();
-  m.onBeforeCompile = (sh) => {
+function addSeatGlow(mat) {
+  mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uStripes: { value: SEAT_STRIPES },
-      uCel: { value: SEAT_CEL }, uWht: { value: SEAT_WHT },
       uPitchXZ: { value: PITCH_XZ }, uGlowC: { value: SEAT_GLOWC },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
       uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
@@ -310,15 +304,12 @@ function makeStripedSeatMat(base) {
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
-      .replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);\n    float s = (ang + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }')
+        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += uGlowC * (0.45 + 0.55 * uActPulse);\n    }\n  }');
-    seatShader = sh;
+    seatShaders.push(sh);
   };
-  m.needsUpdate = true;
-  return m;
+  mat.needsUpdate = true;
 }
 
 const gltfLoader = new GLTFLoader();
@@ -334,21 +325,11 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // asientos: en las gradas van en franjas celestes y blancas (por altura);
-        // en el exterior quedan celeste sólido
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
-          if (/Seats/.test(o.name)) {
-            if (!stripedSeatMat) stripedSeatMat = makeStripedSeatMat(mat);
-            o.material = stripedSeatMat;
-          } else {
-            mat.color.setHex(0x12a0e8);
-          }
+        // butacas: colores ORIGINALES del modelo (celeste + blanco alternado,
+        // como el estadio real); sólo les sumamos el shader de iluminación
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addSeatGlow(mat); }
         }
-        // la franja celeste pintada sobre el cemento de las plateas (seña de Racing)
-        if (mat.name === 'BLK_STADIUM_TERR_STRIPE') mat.color.setHex(0x2f9fdd);
-        // cemento de las tribunas y del playón: gris claro parejo (resalta la
-        // franja y las butacas, y los costados quedan como pavimento, no un pozo)
-        if (mat.name === 'BLK_STADIUM_CONCRETE') { mat.color.setHex(0x70737a); mat.roughness = 0.92; }
         // el techo real es gris grafito visto desde arriba (no celeste)
         if (mat.name === 'BLK_STADIUM_ROOF' || mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
         // el alambrado (reja) entre el campo y las populares es una malla de acero
@@ -361,15 +342,8 @@ gltfLoader.load(
           mat.roughness = 0.4;
           mat.color.setHex(0x9aa6b0);
         }
-        // las barandas/vallas bajas de las gradas SÍ son sólidas (metal pintado)
-        if (mat.name === 'BLK_STADIUM_BARRIER') {
-          mat.metalness = 0.45; mat.roughness = 0.5; mat.color.setHex(0x8b96a0);
-        }
-        // hormigón de palcos/cabinas/estructura: gris claro MATE (así no se
-        // "quema" en blanco brillante ni parece vidrio bajo el sol)
-        if (mat.name === 'BLK_STADIUM_FACADE') { mat.color.setHex(0xbcc1c6); mat.roughness = 0.9; mat.metalness = 0; }
-        // los pasillos/escaleras blancos, un pelín menos encandiladores
-        if (mat.name === 'BLK_STADIUM_SAFETY') mat.color.setHex(0xc2c7cb);
+        // hormigón de palcos/cabinas: mate (no se "quema" en blanco tipo vidrio)
+        if (mat.name === 'BLK_STADIUM_FACADE') { mat.roughness = 0.92; mat.metalness = 0; }
         // vidrios de verdad (ventanales y frente de palcos): azulados y
         // reflejan el cielo (baja rugosidad), no negros opacos
         if (mat.name === 'BLK_STADIUM_FACADE_GLASS') { mat.color.setHex(0x244f6e); mat.metalness = 0.35; mat.roughness = 0.08; }
@@ -797,15 +771,16 @@ function animate() {
     areaHL.userData.fillMat.opacity = 0.14 + p * 0.2;
     areaHL.userData.bandMat.opacity = 0.6 + p * 0.35;
   }
-  // realce emisivo de las butacas del sector elegido (shader)
-  if (seatShader) {
-    const u = seatShader.uniforms;
+  // realce emisivo de las butacas del sector elegido (shader en ambos materiales)
+  const pulse = Math.sin(t * 2.6) * 0.5 + 0.5;
+  for (const sh of seatShaders) {
+    const u = sh.uniforms;
     u.uActive.value = seatGlow.active;
     u.uActAng.value = seatGlow.ang;
     u.uActHalf.value = seatGlow.half;
     u.uActYLo.value = seatGlow.ylo;
     u.uActYHi.value = seatGlow.yhi;
-    u.uActPulse.value = Math.sin(t * 2.6) * 0.5 + 0.5;
+    u.uActPulse.value = pulse;
   }
 
   if (tween) {
