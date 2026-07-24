@@ -21,7 +21,7 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.93;
+renderer.toneMappingExposure = 0.88;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -140,10 +140,10 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 /* ============================================================ Luces ======== */
-const hemi = new THREE.HemisphereLight(0xd6ecfa, 0x45543f, 0.88);
+const hemi = new THREE.HemisphereLight(0xd6ecfa, 0x45543f, 0.78);
 scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff4e2, 2.05);
+const sun = new THREE.DirectionalLight(0xfff4e2, 1.8);
 sun.position.set(115, 155, 70);
 sun.target.position.copy(STADIUM_CENTER);
 sun.castShadow = true;
@@ -181,10 +181,10 @@ function applyDayNight(night) {
     floodGroup.children.forEach((f) => (f.intensity = 900));
   } else {
     scene.background = SKY.day; scene.fog.color.set(0xcfe6f5); scene.environmentIntensity = 0.4;
-    hemi.color.set(0xd6ecfa); hemi.groundColor.set(0x45543f); hemi.intensity = 0.88;
-    sun.color.set(0xfff4e2); sun.intensity = 2.05;
+    hemi.color.set(0xd6ecfa); hemi.groundColor.set(0x45543f); hemi.intensity = 0.78;
+    sun.color.set(0xfff4e2); sun.intensity = 1.8;
     groundMat.color.set(0xffffff);
-    renderer.toneMappingExposure = 0.93;
+    renderer.toneMappingExposure = 0.88;
     floodGroup.children.forEach((f) => (f.intensity = 0));
   }
 }
@@ -304,14 +304,17 @@ function addStandShader(mat, mode) {
       .replace('#include <common>',
         '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;\nuniform vec3 uCelA;uniform vec3 uCelB;uniform vec3 uWhtA;uniform vec3 uWhtB;')
       .replace('#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.38 + 0.18 * uActPulse);\n    }\n  }');
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.55 + 0.22 * uActPulse);\n    }\n  }');
     const stripeExpr =
-      'float s = fract((ang + 3.14159265) * 20.0 / 6.28318531);\n    diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);';
-    const body = mode === 'stripes'
-      ? stripeExpr
-      : // 'primary': franjas sólo dentro del wedge popular (cabeceras, bandeja
-        // baja); en el resto, el ruido celeste del blend
-        'float d1 = abs(atan(sin(ang - 1.5707963), cos(ang - 1.5707963)));\n    float d2 = abs(atan(sin(ang + 1.5707963), cos(ang + 1.5707963)));\n    if (min(d1, d2) < 0.3926991 && vWPos.y < 10.5) {\n      ' + stripeExpr + '\n    } else {\n      diffuseColor.rgb = mix(uCelA, uCelB, tt);\n    }';
+      'float s = fract((ang + 3.14159265) * 32.0 / 6.28318531);\n    diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);';
+    // en las plateas cada material vuelve a su ramp del blend (bloques del
+    // modelo); las franjas pintadas quedan para la zona popular
+    const fallback = mode === 'secondary'
+      ? 'diffuseColor.rgb = mix(uWhtA, uWhtB, tt);'
+      : 'diffuseColor.rgb = mix(uCelA, uCelB, tt);';
+    const wedgeExpr =
+      'float d1 = abs(atan(sin(ang - 1.5707963), cos(ang - 1.5707963)));\n    float d2 = abs(atan(sin(ang + 1.5707963), cos(ang + 1.5707963)));\n    if (min(d1, d2) < 0.7853982 && vWPos.y < 10.5) {\n      ' + stripeExpr + '\n    } else {\n      ' + fallback + '\n    }';
+    const body = mode === 'stripes' ? stripeExpr : wedgeExpr;
     sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
       '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);\n    vec3 cell = floor(vWPos * 2.0);\n    float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n    float tt = smoothstep(0.38, 0.62, h);\n    ' + body + '\n  }');
     seatShaders.push(sh);
@@ -337,10 +340,10 @@ gltfLoader.load(
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
           if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'primary'); }
         }
-        // los bloques BLANCOS enteros son las POPULARES: en la realidad están
-        // pintadas con las franjas celestes/blancas -> se pintan acá
+        // butacas blancas: en las plateas quedan como bloques del modelo; en la
+        // zona popular van pintadas con franjas (ahí no hay butacas)
         if (mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'stripes'); }
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'secondary'); }
         }
         // gradas/terrazas de parado y paredones del cuenco: también pintados
         // con franjas (clonado para no afectar a los túneles)
@@ -372,10 +375,29 @@ gltfLoader.load(
         // reflejan el cielo (baja rugosidad), no negros opacos
         if (mat.name === 'BLK_STADIUM_FACADE_GLASS') { mat.color.setHex(0x244f6e); mat.metalness = 0.35; mat.roughness = 0.08; }
         if (mat.name === 'BLK_STADIUM_PALCO') { mat.color.setHex(0x162838); mat.metalness = 0.3; mat.roughness = 0.12; }
-        // césped: verde más vivo, con el corte alternado un tono más oscuro
+        // césped: verde más vivo, con el corte alternado más marcado
         if (mat.name === 'BLK_STADIUM_TURF') {
           mat.color.setHex(0x3f8f39); mat.roughness = 0.85;
-          if (/Alternate/.test(o.name)) { o.material = mat.clone(); o.material.color.setHex(0x347c30); }
+          if (/Alternate/.test(o.name)) { o.material = mat.clone(); o.material.color.setHex(0x2e772c); }
+        }
+        // arcos: palos BLANCOS brillantes; líneas de cal bien nítidas
+        if (mat.name === 'BLK_STADIUM_LINE') {
+          o.material = mat.clone();
+          if (/Goals/.test(o.name)) {
+            o.material.color.setHex(0xffffff);
+            o.material.emissive.setHex(0x2e2e2e);
+            o.material.roughness = 0.3;
+          } else {
+            o.material.color.setHex(0xf6faf5);
+            o.material.emissive.setHex(0x111111);
+          }
+        }
+        // redes de los arcos: malla blanca translúcida bien visible
+        if (mat.name === 'BLK_STADIUM_NET') {
+          mat.transparent = true;
+          mat.opacity = 0.55;
+          mat.depthWrite = false;
+          mat.color.setHex(0xe9eef2);
         }
       }
       raycastTargets.push(o);
