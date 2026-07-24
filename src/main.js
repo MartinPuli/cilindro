@@ -286,12 +286,11 @@ let modelRoot = null;
 const raycastTargets = [];
 
 /* Franjas de las tribunas: teñimos el material de los asientos por posición, con
-   franjas DIAGONALES celestes y blancas (~35°, mitad y mitad) como en el Cilindro
-   real. El mismo shader ilumina en celeste la tribuna del sector elegido. */
-const SEAT_BAND_H = 0.9;   // ancho de cada franja
-const SEAT_R = 68.0;       // radio medio para la coordenada tangencial
-const SEAT_CEL = new THREE.Color(0x2ba7e6).convertSRGBToLinear();
-const SEAT_WHT = new THREE.Color(0xeff4f8).convertSRGBToLinear();
+   franjas RADIALES (verticales) celestes y blancas alrededor del anillo, como en
+   la foto aérea real del Cilindro. El mismo shader ilumina la tribuna elegida. */
+const SEAT_STRIPES = 20.0; // franjas celestes (y otras tantas blancas) alrededor
+const SEAT_CEL = new THREE.Color(0x33a8e0).convertSRGBToLinear();
+const SEAT_WHT = new THREE.Color(0xeef3f7).convertSRGBToLinear();
 const SEAT_GLOWC = new THREE.Color(0x3fc0ff).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
 let stripedSeatMat = null;
@@ -299,7 +298,7 @@ function makeStripedSeatMat(base) {
   const m = base.clone();
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
-      uBandH: { value: SEAT_BAND_H }, uR: { value: SEAT_R },
+      uStripes: { value: SEAT_STRIPES },
       uCel: { value: SEAT_CEL }, uWht: { value: SEAT_WHT },
       uPitchXZ: { value: PITCH_XZ }, uGlowC: { value: SEAT_GLOWC },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
@@ -311,9 +310,9 @@ function makeStripedSeatMat(base) {
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform float uBandH;uniform float uR;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+        '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
       .replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float arc = atan(dxz.y, dxz.x) * uR;\n    float u = vWPos.y * 0.819 - arc * 0.574;\n    float band = mod(u, uBandH * 2.0);\n    diffuseColor.rgb = band < uBandH ? uCel : uWht;\n  }')
+        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);\n    float s = (ang + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }')
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += uGlowC * (0.45 + 0.55 * uActPulse);\n    }\n  }');
     seatShader = sh;
