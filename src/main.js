@@ -283,10 +283,11 @@ const raycastTargets = [];
    posición (celdas de ~50 cm ≈ una butaca). Además el shader sube el brillo
    de la tribuna del sector elegido (recorte exacto, criterio de areaForSeat). */
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-// stops exactos de los ColorRamp del .blend (valores lineales)
+// stops de los ColorRamp del .blend, oscurecidos un poco (los blancos puros
+// quemaban a pleno sol)
 const RAMPS = {
-  BLK_STADIUM_SEATS_PRIMARY: { a: [0.075, 0.33, 0.64], b: [0.135, 0.47, 0.83] },
-  BLK_STADIUM_SEATS_SECONDARY: { a: [0.88, 0.89, 0.885], b: [1.0, 1.0, 0.995] },
+  BLK_STADIUM_SEATS_PRIMARY: { a: [0.06, 0.27, 0.53], b: [0.11, 0.39, 0.69] },
+  BLK_STADIUM_SEATS_SECONDARY: { a: [0.68, 0.69, 0.686], b: [0.79, 0.79, 0.786] },
   BLK_STADIUM_CONCRETE: { a: [0.152, 0.15, 0.142], b: [0.212, 0.209, 0.198] },
 };
 // mode: 'primary' (butacas celestes: ruido del blend, pero DENTRO de las
@@ -312,8 +313,11 @@ function addStandShader(mat, mode) {
         '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;\nuniform vec3 uCelA;uniform vec3 uCelB;uniform vec3 uWhtA;uniform vec3 uWhtB;')
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.55 + 0.22 * uActPulse);\n    }\n  }');
+    // la banda de los PALCOS (y las bocas de entrada a esa altura) va oscura y
+    // limpia: la geometría de butacas que se cruza ahí no se pinta a franjas,
+    // así los palcos no quedan "tachados"
     const stripeExpr =
-      'float s = fract((ang + 3.14159265) * 32.0 / 6.28318531);\n    diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);';
+      'if (vWPos.y > 9.8 && vWPos.y < 12.3) {\n      diffuseColor.rgb = vec3(0.022, 0.026, 0.032);\n    } else {\n      float s = fract((ang + 3.14159265) * 32.0 / 6.28318531);\n      diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);\n    }';
     // en las plateas cada material vuelve a su ramp del blend (bloques del
     // modelo); las franjas pintadas quedan para la zona popular
     const fallback = mode === 'secondary'
