@@ -341,9 +341,9 @@ gltfLoader.load(
     modelRoot = gltf.scene;
     modelRoot.traverse((o) => {
       if (!o.isMesh) return;
-      // bloques "Exterior" decorativos sueltos (quedan flotando fuera del
-      // estadio): no van
-      if (/^Stadium_Exterior/.test(o.name)) { o.visible = false; return; }
+      // piezas sueltas del modelo que quedan flotando LEJOS del estadio
+      // (Exterior_* y los Wall/Seating a radio 363-473): no van
+      if (/^Stadium_(Exterior|Wall|Seating)/.test(o.name)) { o.visible = false; return; }
       o.castShadow = true;
       o.receiveShadow = true;
       const mat = o.material;
@@ -357,8 +357,7 @@ gltfLoader.load(
         // gradas/terrazas de parado y paredones del cuenco: también pintados
         // con franjas (clonado para no afectar a los túneles)
         const isBowlStand =
-          ((mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE') && !/Tunnel/.test(o.name)) ||
-          (mat.name === 'BLK_FEATURE' && /Wall|Seating/.test(o.name));
+          (mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE') && !/Tunnel/.test(o.name);
         if (isBowlStand) {
           o.material = mat.clone();
           addStandShader(o.material, 'stripes');
