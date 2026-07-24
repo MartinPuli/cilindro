@@ -13,7 +13,7 @@ const OVERVIEW_POS = new THREE.Vector3(150, 108, 178);
 const IS_LOCAL = ['localhost', '127.0.0.1', ''].includes(location.hostname);
 const MODEL_URL = IS_LOCAL
   ? './models/RACING_3D.glb'
-  : 'https://cdn.jsdelivr.net/gh/MartinPuli/cilindro@52e41f42dbee578a7d0a0a77f2d1b2c08293ebfe/public/models/RACING_3D.glb';
+  : 'https://cdn.jsdelivr.net/gh/MartinPuli/cilindro@8b5d22bd7f1b985cde2819fdef54e222272eede8/public/models/RACING_3D.glb';
 
 const canvas = document.getElementById('scene');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -266,26 +266,43 @@ const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
 
-/* Tribunas: los colores quedan EXACTAMENTE como vienen en el modelo (sin
-   franjas ni recolores nuestros). El shader sólo SUBE EL BRILLO de la tribuna
-   del sector elegido, con el recorte exacto (mismo criterio que areaForSeat). */
+/* Tribunas: colores FIELES AL .BLEND. En el blend las butacas y el cemento no
+   son un color chato: un ruido mezcla dos tonos (ColorRamp). El GLB aplasta
+   eso, así que acá reproducimos el mismo ramp con sus stops exactos, por
+   posición (celdas de ~50 cm ≈ una butaca). Además el shader sube el brillo
+   de la tribuna del sector elegido (recorte exacto, criterio de areaForSeat). */
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
-function addStandShader(mat) {
+// stops exactos de los ColorRamp del .blend (valores lineales)
+const RAMPS = {
+  BLK_STADIUM_SEATS_PRIMARY: { a: [0.075, 0.33, 0.64], b: [0.135, 0.47, 0.83] },
+  BLK_STADIUM_SEATS_SECONDARY: { a: [0.88, 0.89, 0.885], b: [1.0, 1.0, 0.995] },
+  BLK_STADIUM_CONCRETE: { a: [0.152, 0.15, 0.142], b: [0.212, 0.209, 0.198] },
+};
+function addStandShader(mat, ramp) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uPitchXZ: { value: PITCH_XZ },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
       uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
     });
+    if (ramp) {
+      sh.uniforms.uRampA = { value: new THREE.Vector3(...ramp.a) };
+      sh.uniforms.uRampB = { value: new THREE.Vector3(...ramp.b) };
+    }
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;'
+        + (ramp ? 'uniform vec3 uRampA;uniform vec3 uRampB;' : ''))
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.38 + 0.18 * uActPulse);\n    }\n  }');
+    if (ramp) {
+      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
+        '#include <color_fragment>\n  {\n    vec3 cell = floor(vWPos * 2.0);\n    float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n    diffuseColor.rgb = mix(uRampA, uRampB, smoothstep(0.38, 0.62, h));\n  }');
+    }
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -304,19 +321,19 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // tribunas: colores TAL CUAL el modelo (sin recolor ni franjas); el
-        // shader sólo agrega la iluminación del sector elegido
+        // butacas: el ruido de dos tonos EXACTO del .blend (ColorRamp) + la
+        // iluminación del sector elegido
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat); }
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, RAMPS[mat.name]); }
         }
-        // las gradas/terrazas y paredones del cuenco también se iluminan con el
-        // sector (clonado para no afectar a los túneles), sin cambiar su color
+        // gradas/terrazas y paredones del cuenco: se iluminan con el sector
+        // (clonado para no afectar a los túneles); el cemento lleva su ramp
         const isBowlStand =
           ((mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE') && !/Tunnel/.test(o.name)) ||
           (mat.name === 'BLK_FEATURE' && /Wall|Seating/.test(o.name));
         if (isBowlStand) {
           o.material = mat.clone();
-          addStandShader(o.material);
+          addStandShader(o.material, RAMPS[mat.name]);
         }
         // techo: gris grafito arriba (foto aérea); por dentro claro, casi blanco
         if (mat.name === 'BLK_STADIUM_ROOF_TOP') mat.color.setHex(0x3d434b);
