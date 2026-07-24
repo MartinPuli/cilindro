@@ -191,14 +191,18 @@ function applyDayNight(night) {
 
 /* ============================================================ Marcador ===== */
 const marker = new THREE.Group();
-const markerMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ec, emissive: 0x2f9fe0, emissiveIntensity: 1.4, roughness: 0.4 });
+const markerMat = new THREE.MeshStandardMaterial({ color: 0x59b8e6, emissive: 0x2f9fe0, emissiveIntensity: 1.6, roughness: 0.35 });
 {
-  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.05, 0.18, 10, 28), markerMat);
+  // pin chico tipo mapa: anillo en la base + gota flotando con la punta abajo
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.07, 10, 26), markerMat);
   ring.rotation.x = Math.PI / 2;
-  const pin = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.6, 16), markerMat);
-  pin.position.y = 1.7;
+  ring.position.y = 0.06;
+  const pin = new THREE.Mesh(new THREE.ConeGeometry(0.24, 0.75, 18), markerMat);
+  pin.position.y = 1.0;
   pin.rotation.x = Math.PI;
-  marker.add(ring, pin);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 12), markerMat);
+  cap.position.y = 1.38;
+  marker.add(ring, pin, cap);
 }
 marker.visible = false;
 scene.add(marker);
@@ -278,44 +282,38 @@ const RAMPS = {
   BLK_STADIUM_SEATS_SECONDARY: { a: [0.88, 0.89, 0.885], b: [1.0, 1.0, 0.995] },
   BLK_STADIUM_CONCRETE: { a: [0.152, 0.15, 0.142], b: [0.212, 0.209, 0.198] },
 };
-// mode: null (sólo iluminación) | 'noise' (ramp del blend) | 'stripes'
-// (franjas radiales pintadas, cada franja con su ramp del blend — para las
-// populares y superficies que en el modelo quedaban de un solo color)
-function addStandShader(mat, mode, ramp) {
+// mode: 'primary' (butacas celestes: ruido del blend, pero DENTRO de las
+// populares —bandeja baja de las cabeceras— van pintadas con franjas, porque
+// ahí no hay asientos) | 'stripes' (franjas pintadas siempre)
+function addStandShader(mat, mode) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, {
       uPitchXZ: { value: PITCH_XZ },
       uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
       uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
+      uCelA: { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_PRIMARY.a) },
+      uCelB: { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_PRIMARY.b) },
+      uWhtA: { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_SECONDARY.a) },
+      uWhtB: { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_SECONDARY.b) },
     });
-    if (mode === 'noise' && ramp) {
-      sh.uniforms.uRampA = { value: new THREE.Vector3(...ramp.a) };
-      sh.uniforms.uRampB = { value: new THREE.Vector3(...ramp.b) };
-    }
-    if (mode === 'stripes') {
-      sh.uniforms.uCelA = { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_PRIMARY.a) };
-      sh.uniforms.uCelB = { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_PRIMARY.b) };
-      sh.uniforms.uWhtA = { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_SECONDARY.a) };
-      sh.uniforms.uWhtB = { value: new THREE.Vector3(...RAMPS.BLK_STADIUM_SEATS_SECONDARY.b) };
-    }
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>',
-        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;'
-        + (mode === 'noise' ? 'uniform vec3 uRampA;uniform vec3 uRampB;' : '')
-        + (mode === 'stripes' ? 'uniform vec3 uCelA;uniform vec3 uCelB;uniform vec3 uWhtA;uniform vec3 uWhtB;' : ''))
+        '#include <common>\nvarying vec3 vWPos;\nuniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;\nuniform vec3 uCelA;uniform vec3 uCelB;uniform vec3 uWhtA;uniform vec3 uWhtB;')
       .replace('#include <emissivemap_fragment>',
         '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.38 + 0.18 * uActPulse);\n    }\n  }');
-    if (mode === 'noise') {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec3 cell = floor(vWPos * 2.0);\n    float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n    diffuseColor.rgb = mix(uRampA, uRampB, smoothstep(0.38, 0.62, h));\n  }');
-    } else if (mode === 'stripes') {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float s = fract((atan(dxz.y, dxz.x) + 3.14159265) * 20.0 / 6.28318531);\n    vec3 cell = floor(vWPos * 2.0);\n    float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n    float tt = smoothstep(0.38, 0.62, h);\n    diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);\n  }');
-    }
+    const stripeExpr =
+      'float s = fract((ang + 3.14159265) * 20.0 / 6.28318531);\n    diffuseColor.rgb = s < 0.5 ? mix(uCelA, uCelB, tt) : mix(uWhtA, uWhtB, tt);';
+    const body = mode === 'stripes'
+      ? stripeExpr
+      : // 'primary': franjas sólo dentro del wedge popular (cabeceras, bandeja
+        // baja); en el resto, el ruido celeste del blend
+        'float d1 = abs(atan(sin(ang - 1.5707963), cos(ang - 1.5707963)));\n    float d2 = abs(atan(sin(ang + 1.5707963), cos(ang + 1.5707963)));\n    if (min(d1, d2) < 0.3926991 && vWPos.y < 10.5) {\n      ' + stripeExpr + '\n    } else {\n      diffuseColor.rgb = mix(uCelA, uCelB, tt);\n    }';
+    sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
+      '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);\n    vec3 cell = floor(vWPos * 2.0);\n    float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);\n    float tt = smoothstep(0.38, 0.62, h);\n    ' + body + '\n  }');
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -335,8 +333,9 @@ gltfLoader.load(
       if (mat) {
         mat.side = THREE.FrontSide;
         // butacas celestes: bloques del modelo con el ruido exacto del .blend
+        // (dentro de las populares van pintadas con franjas, no como butacas)
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'noise', RAMPS[mat.name]); }
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, 'primary'); }
         }
         // los bloques BLANCOS enteros son las POPULARES: en la realidad están
         // pintadas con las franjas celestes/blancas -> se pintan acá
@@ -463,11 +462,14 @@ function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
   hideAreaHighlight();
   autoOrbit = false;
-  // altura de los ojos sentado, apenas hacia adelante (sobre la baranda)
+  // altura de los ojos sentado, apenas hacia adelante (sobre la baranda).
+  // En la banda de los PALCOS la cámara quedaría adentro del box (no se ve
+  // nada): se adelanta hasta el balcón, delante del vidrio.
+  const inPalco = seat.point.y > 9.2 && seat.point.y < 12.6;
   const eye = seat.point.clone();
-  eye.y += 1.2;
+  eye.y += inPalco ? 1.5 : 1.2;
   const toC = PITCH.clone().sub(eye); toC.y = 0; toC.normalize();
-  eye.addScaledVector(toC, 0.6);
+  eye.addScaledVector(toC, inPalco ? 3.0 : 0.6);
   // mirar al mediocampo a media altura: se ve la cancha y la tribuna de enfrente
   const look = new THREE.Vector3(PITCH.x, 3.0, PITCH.z).addScaledVector(toC, 6);
   const fov = seat.area.kind === 'palco' ? 52 : 58;
@@ -516,6 +518,7 @@ function pickSeat(clientX, clientY) {
     if (!isPop) price = area.priceFrom * (1 + Math.max(0, 18 - fila) * 0.02);
     pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind, sold };
     marker.position.copy(p);
+    marker.userData.baseY = p.y;
     marker.visible = true;
     renderArea(area, pendingSeat);
     return;
@@ -789,8 +792,7 @@ function animate() {
 
   if (marker.visible) {
     marker.rotation.y = t * 1.2;
-    const s = 1 + Math.sin(t * 3) * 0.08;
-    marker.scale.setScalar(s);
+    marker.position.y = (marker.userData.baseY || 0) + Math.sin(t * 2.4) * 0.1;
   }
   // brillo de las butacas del sector elegido (shader en ambos materiales)
   const pulse = Math.sin(t * 2.6) * 0.5 + 0.5;
