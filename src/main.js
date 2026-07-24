@@ -200,13 +200,12 @@ const markerMat = new THREE.MeshStandardMaterial({ color: 0x6ec6ec, emissive: 0x
   pin.rotation.x = Math.PI;
   marker.add(ring, pin);
 }
-// pinta el marcador según disponibilidad (celeste = libre, rojo = ocupada)
-function setMarkerSold(sold) {
-  markerMat.color.setHex(sold ? 0xff5a4d : 0x6ec6ec);
-  markerMat.emissive.setHex(sold ? 0xd21d10 : 0x2f9fe0);
-}
 marker.visible = false;
 scene.add(marker);
+
+// Estado de iluminación del sector activo (lo usa el shader de las butacas).
+const seatGlow = { active: 0, ang: 0, half: 0.6, ylo: 1, yhi: 21, pulse: 0 };
+let seatShader = null;
 
 /* ====================================================== Resaltado de área == */
 // Cámara para encuadrar una tribuna (desde el campo, por debajo del techo,
@@ -220,71 +219,17 @@ function areaView(area) {
   return { pos, look, fov };
 }
 
-/* ============================ Entradas vendidas (simulación en rojo) ======== */
-const FORWARD = new THREE.Vector3(0, 0, 1);
-const reserved = new Set();          // butacas reservadas en esta sesión (demo)
-let lastOcc = { sold: 0, total: 0 }; // ocupación del sector activo (para la card)
 const bowlRadiusAt = (y) => 50 + (93 - 50) * (y - 1) / 19; // radio del cuenco a esa altura
 const filaAt = (y) => THREE.MathUtils.clamp(Math.round((y - 1.6) / 0.42) + 1, 1, 58);
 function colAt(area, angle) {
   return area.kind === 'popular'
-    ? Math.round((angle + Math.PI) * 6)                       // columnas anchas (popular)
+    ? 'Gral.'
     : 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % 214); // butaca numerada
-}
-function seatKey(area, fila, col) { return `${area.id}:${fila}:${col}`; }
-function seatSold(area, fila, col) {
-  if (reserved.has(seatKey(area, fila, col))) return true;    // ya reservada (demo)
-  const salt = AREAS.indexOf(area) + 1;
-  let h = (Math.imul(fila * salt, 73856093) ^ Math.imul(col + 1, 19349663)) >>> 0;
-  h = (h ^ (h >>> 13)) >>> 0;
-  return (h % 100) < 40;                                      // ~40% ya vendidas
-}
-
-// Discos rojos sobre las butacas ya compradas del sector activo.
-let soldHL = null;
-function showSoldSeats(area) {
-  hideSoldSeats();
-  const span = area.kind === 'popular' ? 1.5 : 1.15;
-  const lo = area.band === 'high' ? 11 : 2.2;
-  const hi = area.band === 'low' ? 10 : 18.5;
-  const nA = 26, nY = 14;
-  const geo = new THREE.CircleGeometry(0.5, 10);
-  const mat = new THREE.MeshBasicMaterial({ color: 0xff4436, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
-  const inst = new THREE.InstancedMesh(geo, mat, nA * nY);
-  const m = new THREE.Matrix4(), pos = new THREE.Vector3(), q = new THREE.Quaternion(), scl = new THREE.Vector3(1, 1, 1), dir = new THREE.Vector3();
-  let i = 0, total = 0;
-  for (let ai = 0; ai < nA; ai++) {
-    const th = area.ang - span / 2 + span * (ai + 0.5) / nA;
-    const col = colAt(area, th);
-    for (let yi = 0; yi < nY; yi++) {
-      const y = lo + (hi - lo) * (yi + 0.5) / nY;
-      total++;
-      if (!seatSold(area, filaAt(y), col)) continue;
-      const r = bowlRadiusAt(y) - 0.5;
-      pos.set(PITCH.x + Math.cos(th) * r, y, PITCH.z + Math.sin(th) * r);
-      dir.set(PITCH.x - pos.x, 0, PITCH.z - pos.z).normalize();
-      q.setFromUnitVectors(FORWARD, dir);
-      m.compose(pos, q, scl);
-      inst.setMatrixAt(i++, m);
-    }
-  }
-  inst.count = i;
-  inst.instanceMatrix.needsUpdate = true;
-  inst.renderOrder = 2;
-  lastOcc = { sold: i, total };
-  soldHL = inst;
-  scene.add(inst);
-}
-function hideSoldSeats() {
-  if (!soldHL) return;
-  scene.remove(soldHL);
-  soldHL.geometry.dispose();
-  soldHL.material.dispose();
-  soldHL = null;
 }
 
 /* ====================================================== Resaltado de área == */
-// Al tocar una tribuna, ésta se ILUMINA en celeste (glow suave + borde brillante).
+// Al elegir un sector, esa tribuna SE ILUMINA en celeste: un glow sobre el cuenco
+// + (en las plateas) un realce emisivo de las propias butacas via shader.
 let areaHL = null;
 function showAreaHighlight(area) {
   hideAreaHighlight();
@@ -294,30 +239,35 @@ function showAreaHighlight(area) {
   const hi = area.band === 'low' ? 10.5 : 20;
   const rAt = bowlRadiusAt;
   const g = new THREE.Group();
-  // luz celeste suave sobre la tribuna (la "alumbra", no tapa los asientos)
+  // baño de luz celeste sobre la tribuna elegida
   const fillMat = new THREE.MeshBasicMaterial({
-    color: 0x35bdff, transparent: true, opacity: 0.16,
+    color: 0x4fc6ff, transparent: true, opacity: 0.2,
     side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const fill = new THREE.Mesh(
     new THREE.CylinderGeometry(rAt(hi), rAt(lo), hi - lo, 48, 1, true, thetaStart, thetaLen), fillMat);
   fill.position.set(PITCH.x, (lo + hi) / 2, PITCH.z);
-  // borde brillante en el tope de la banda: marca clara y prolija del sector
+  // borde brillante arriba: remarca prolijo del sector
   const bandMat = new THREE.MeshBasicMaterial({
-    color: 0x9fe6ff, transparent: true, opacity: 0.8,
+    color: 0xbdeeff, transparent: true, opacity: 0.85,
     side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const band = new THREE.Mesh(
-    new THREE.CylinderGeometry(rAt(hi + 1.3), rAt(hi - 1.3), 2.4, 48, 1, true, thetaStart, thetaLen), bandMat);
+    new THREE.CylinderGeometry(rAt(hi + 1.3), rAt(hi - 1.3), 2.6, 48, 1, true, thetaStart, thetaLen), bandMat);
   band.position.set(PITCH.x, hi, PITCH.z);
   g.add(fill, band);
   g.userData = { fillMat, bandMat };
   areaHL = g;
   scene.add(areaHL);
-  showSoldSeats(area);
+  // realce de las butacas del sector (shader): ángulo y banda activos
+  seatGlow.active = 1;
+  seatGlow.ang = area.ang;
+  seatGlow.half = (area.kind === 'popular' ? 1.55 : 1.2) / 2;
+  seatGlow.ylo = lo - 0.5;
+  seatGlow.yhi = hi + 0.5;
 }
 function hideAreaHighlight() {
-  hideSoldSeats();
+  seatGlow.active = 0;
   if (!areaHL) return;
   scene.remove(areaHL);
   areaHL.traverse((o) => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
@@ -330,6 +280,43 @@ const fillEl = document.getElementById('loader-fill');
 const pctEl = document.getElementById('loader-pct');
 let modelRoot = null;
 const raycastTargets = [];
+
+/* Franjas de las tribunas: teñimos el material de los asientos por posición, con
+   franjas DIAGONALES celestes y blancas (~35°, mitad y mitad) como en el Cilindro
+   real. El mismo shader ilumina en celeste la tribuna del sector elegido. */
+const SEAT_BAND_H = 0.9;   // ancho de cada franja
+const SEAT_R = 68.0;       // radio medio para la coordenada tangencial
+const SEAT_CEL = new THREE.Color(0x2ba7e6).convertSRGBToLinear();
+const SEAT_WHT = new THREE.Color(0xeff4f8).convertSRGBToLinear();
+const SEAT_GLOWC = new THREE.Color(0x3fc0ff).convertSRGBToLinear();
+const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
+let stripedSeatMat = null;
+function makeStripedSeatMat(base) {
+  const m = base.clone();
+  m.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, {
+      uBandH: { value: SEAT_BAND_H }, uR: { value: SEAT_R },
+      uCel: { value: SEAT_CEL }, uWht: { value: SEAT_WHT },
+      uPitchXZ: { value: PITCH_XZ }, uGlowC: { value: SEAT_GLOWC },
+      uActive: { value: 0 }, uActAng: { value: 0 }, uActHalf: { value: 0.6 },
+      uActYLo: { value: 1 }, uActYHi: { value: 21 }, uActPulse: { value: 0 },
+    });
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+      .replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n#ifdef USE_INSTANCING\n  vWPos = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n  vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>',
+        '#include <common>\nvarying vec3 vWPos;\nuniform float uBandH;uniform float uR;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform vec3 uGlowC;uniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
+      .replace('#include <color_fragment>',
+        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float arc = atan(dxz.y, dxz.x) * uR;\n    float u = vWPos.y * 0.819 - arc * 0.574;\n    float band = mod(u, uBandH * 2.0);\n    diffuseColor.rgb = band < uBandH ? uCel : uWht;\n  }')
+      .replace('#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += uGlowC * (0.45 + 0.55 * uActPulse);\n    }\n  }');
+    seatShader = sh;
+  };
+  m.needsUpdate = true;
+  return m;
+}
 
 const gltfLoader = new GLTFLoader();
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
@@ -344,8 +331,16 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // asientos celeste vívido como en el estadio real (foto aérea)
-        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x0f9ee6);
+        // asientos: en las gradas van en franjas celestes y blancas (por altura);
+        // en el exterior quedan celeste sólido
+        if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') {
+          if (/Seats/.test(o.name)) {
+            if (!stripedSeatMat) stripedSeatMat = makeStripedSeatMat(mat);
+            o.material = stripedSeatMat;
+          } else {
+            mat.color.setHex(0x12a0e8);
+          }
+        }
         // la franja celeste pintada sobre el cemento de las plateas (seña de Racing)
         if (mat.name === 'BLK_STADIUM_TERR_STRIPE') mat.color.setHex(0x2f9fdd);
         // cemento de las tribunas y del playón: gris claro parejo (resalta la
@@ -466,20 +461,21 @@ function goSeat(seat) {
   mode = 'transition'; pendingSeat = seat; marker.visible = false;
   hideAreaHighlight();
   autoOrbit = false;
-  // altura natural de la butaca + un pasito hacia la cancha (el alambrado ya es
-  // transparente, así que no hace falta subir de más)
+  // altura de los ojos sentado, apenas hacia adelante (sobre la baranda)
   const eye = seat.point.clone();
-  eye.y += 1.4;
+  eye.y += 1.2;
   const toC = PITCH.clone().sub(eye); toC.y = 0; toC.normalize();
-  eye.addScaledVector(toC, 0.9);
-  const look = PITCH.clone();
+  eye.addScaledVector(toC, 0.6);
+  // mirar al mediocampo a media altura: se ve la cancha y la tribuna de enfrente
+  const look = new THREE.Vector3(PITCH.x, 3.0, PITCH.z).addScaledVector(toC, 6);
+  const fov = seat.area.kind === 'palco' ? 52 : 58;
   startTween({
-    toPos: eye, toLook: look, toFov: seat.area.kind === 'palco' ? 52 : 60, duration: 1350,
+    toPos: eye, toLook: look, toFov: fov, duration: 1350,
     onDone: () => {
       // en la butaca estás sentado: sólo girás la cabeza (primera persona, sin moverte)
       mode = 'seat';
       aimView(eye.clone(), look.clone());
-      view.fov = seat.area.kind === 'palco' ? 52 : 60;
+      view.fov = fov;
       updateJoy();
     },
   });
@@ -511,14 +507,11 @@ function pickSeat(clientX, clientY) {
     }
     const fila = filaAt(p.y);
     const isPop = area.kind === 'popular';
-    const col = colAt(area, angle);
-    const butaca = isPop ? 'Gral.' : col;
-    const sold = seatSold(area, fila, col);
+    const butaca = isPop ? 'Gral.' : colAt(area, angle);
     let price = area.priceFrom;
     if (!isPop) price = area.priceFrom * (1 + Math.max(0, 18 - fila) * 0.02);
-    pendingSeat = { point: p.clone(), area, fila, butaca, col, price, kind: area.kind, sold };
+    pendingSeat = { point: p.clone(), area, fila, butaca, price, kind: area.kind };
     marker.position.copy(p);
-    setMarkerSold(sold);
     marker.visible = true;
     renderArea(area, pendingSeat);
     return;
@@ -703,8 +696,7 @@ function renderSeat(seat) {
   wireSeatCard(seat, true);
 }
 
-// Card compartida: paso de confirmación (inSeat=false) y vista desde la butaca
-// (inSeat=true). Muestra disponibilidad (verde/rojo) y la ocupación del sector.
+// Card compartida: paso de confirmación (inSeat=false) y vista desde la butaca (inSeat=true).
 function metaLabel(seat) {
   return seat.kind === 'popular'
     ? `<div class="meta-item"><span class="meta-k">Ubicación</span><span class="meta-v">Popular</span></div>`
@@ -712,30 +704,18 @@ function metaLabel(seat) {
 }
 function seatCardHTML(seat, inSeat) {
   const a = seat.area;
-  const sold = seat.sold;
-  const pct = lastOcc.total ? Math.round((lastOcc.sold / lastOcc.total) * 100) : 0;
-  const badge = sold
-    ? `<span class="avail-badge sold">● Ocupada</span>`
-    : `<span class="avail-badge free">● Disponible</span>`;
   const actions = inSeat
     ? `<button class="btn btn-ghost" id="seat-change">Cambiar butaca</button>
-       <button class="btn ${sold ? 'btn-disabled' : 'btn-primary'}" id="seat-grab" ${sold ? 'disabled' : ''}>${sold ? 'Ocupada' : 'Reservar (demo)'}</button>`
+       <button class="btn btn-primary" id="seat-grab">Reservar (demo)</button>`
     : `<button class="btn btn-ghost" id="re-pick">Otro lugar</button>
-       <button class="btn ${sold ? 'btn-warn' : 'btn-primary'}" id="go-view">${sold ? 'Ver igual' : 'Ver desde acá'}</button>`;
+       <button class="btn btn-primary" id="go-view">Ver desde acá</button>`;
   const note = inSeat
     ? `<div class="seat-desc">${a.desc} <b>Arrastrá para mirar alrededor y usá la rueda o el pellizco para acercar.</b></div>`
-    : (sold
-        ? `<div class="seat-desc sold-note">Esta butaca ya está <b>comprada</b>. Elegí una de las que están en celeste (libres).</div>`
-        : '');
+    : '';
   return `
-    <div class="seat-head ${sold ? 'is-sold' : ''}">
-      <span class="seat-accent" style="background:${sold ? '#ff4436' : a.color};color:${sold ? '#ff4436' : a.color}"></span>
+    <div class="seat-head">
+      <span class="seat-accent" style="background:${a.color};color:${a.color}"></span>
       <span class="seat-head-txt"><span class="seat-name">${a.name}</span><span class="seat-tier">${a.tier}</span></span>
-      ${badge}
-    </div>
-    <div class="occ-row">
-      <div class="occ-bar"><span style="width:${pct}%"></span></div>
-      <span class="occ-txt">${pct}% ocupado</span>
     </div>
     <div class="seat-meta">
       <div class="meta-item"><span class="meta-k">Fila</span><span class="meta-v">${seat.fila}</span></div>
@@ -749,25 +729,13 @@ function wireSeatCard(seat, inSeat) {
   const a = seat.area;
   if (inSeat) {
     sheetContent.querySelector('#seat-change').addEventListener('click', () => goArea(a));
-    const grab = sheetContent.querySelector('#seat-grab');
-    if (!seat.sold) grab.addEventListener('click', () => reserveSeat(seat));
+    sheetContent.querySelector('#seat-grab').addEventListener('click', () => toast(`¡Lugar en ${a.name} reservado! 🔵⚪`));
   } else {
     sheetContent.querySelector('#go-view').addEventListener('click', () => goSeat(pendingSeat));
     sheetContent.querySelector('#re-pick').addEventListener('click', () => {
       pendingSeat = null; marker.visible = false; renderArea(a);
     });
   }
-}
-// Reservar (demo): la butaca queda comprada -> se pinta de ROJO y suma a la ocupación.
-function reserveSeat(seat) {
-  const a = seat.area;
-  reserved.add(seatKey(a, seat.fila, seat.col));
-  seat.sold = true;
-  if (pendingSeat) pendingSeat.sold = true;
-  setMarkerSold(true);
-  lastOcc = { sold: lastOcc.sold + 1, total: lastOcc.total }; // reflejar al toque
-  toast(`¡Butaca reservada en ${a.name}! Queda en rojo 🔴`);
-  renderSeat(seat);
 }
 
 backbtn.addEventListener('click', () => {
@@ -815,8 +783,18 @@ function animate() {
   }
   if (areaHL) {
     const p = Math.sin(t * 2.3) * 0.5 + 0.5;
-    areaHL.userData.fillMat.opacity = 0.12 + p * 0.16;
-    areaHL.userData.bandMat.opacity = 0.55 + p * 0.35;
+    areaHL.userData.fillMat.opacity = 0.14 + p * 0.2;
+    areaHL.userData.bandMat.opacity = 0.6 + p * 0.35;
+  }
+  // realce emisivo de las butacas del sector elegido (shader)
+  if (seatShader) {
+    const u = seatShader.uniforms;
+    u.uActive.value = seatGlow.active;
+    u.uActAng.value = seatGlow.ang;
+    u.uActHalf.value = seatGlow.half;
+    u.uActYLo.value = seatGlow.ylo;
+    u.uActYHi.value = seatGlow.yhi;
+    u.uActPulse.value = Math.sin(t * 2.6) * 0.5 + 0.5;
   }
 
   if (tween) {
