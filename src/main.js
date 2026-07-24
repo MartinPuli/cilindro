@@ -59,9 +59,9 @@ function clampPos() {
     const maxR = 110;
     if (r > maxR) { const s = maxR / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
   } else {
-    // vista aérea: recorrido amplio alrededor del estadio
+    // vista aérea: recorrido alrededor del estadio, sin salirse del pasto
     view.pos.y = THREE.MathUtils.clamp(view.pos.y, 2.5, 135);
-    if (r > 440) { const s = 440 / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
+    if (r > 225) { const s = 225 / r; view.pos.x = STADIUM_CENTER.x + dx * s; view.pos.z = STADIUM_CENTER.z + dz * s; }
   }
 }
 function applyMove(dt) {
@@ -106,7 +106,7 @@ function makeSky(top, mid, bottom) {
 }
 const SKY = { day: makeSky('#4ea3e0', '#a9d7f2', '#e8f4fb'), night: makeSky('#050c1a', '#0b1c33', '#16324d') };
 scene.background = SKY.day;
-scene.fog = new THREE.Fog(0xcfe6f5, 320, 620);
+scene.fog = new THREE.Fog(0xcfe6f5, 260, 560);
 
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -133,7 +133,7 @@ function makeGroundTexture() {
   return t;
 }
 const groundMat = new THREE.MeshStandardMaterial({ map: makeGroundTexture(), roughness: 1, metalness: 0 });
-const ground = new THREE.Mesh(new THREE.CircleGeometry(440, 72), groundMat);
+const ground = new THREE.Mesh(new THREE.CircleGeometry(230, 72), groundMat);
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -0.02;
 ground.receiveShadow = true;
@@ -220,10 +220,12 @@ function areaView(area) {
 }
 
 const filaAt = (y) => THREE.MathUtils.clamp(Math.round((y - 1.6) / 0.42) + 1, 1, 58);
-// butaca numerada: cada sector tiene ~cap/58 butacas por fila (capacidad real)
+// butaca numerada: cada sector tiene ~cap/58 butacas por fila (capacidad real).
+// Resolución fina (~180/rad ≈ una butaca cada 33 cm): tocar la butaca de al
+// lado YA cambia el número.
 function colNumAt(area, angle) {
   const perRow = Math.max(40, Math.round(area.cap / 58));
-  return 1 + (Math.abs(Math.round((angle + Math.PI) * 34)) % perRow);
+  return 1 + (Math.abs(Math.round((angle + Math.PI) * 180)) % perRow);
 }
 // Algunas butacas ya están ocupadas (ejemplo, sin marcarlas en el 3D): no se
 // pueden reservar. Es determinístico, así una misma butaca siempre da igual.
@@ -271,8 +273,8 @@ const raycastTargets = [];
    - siempre: SUBE EL BRILLO de la tribuna del sector elegido, con su propio
      color y el recorte EXACTO del sector (mismo criterio que areaForSeat). */
 const SEAT_STRIPES = 20.0; // pares de franjas en las gradas pintadas
-const SEAT_CEL = new THREE.Color(0x59b8e6).convertSRGBToLinear(); // celeste oficial
-const SEAT_WHT = new THREE.Color(0xf2f6f9).convertSRGBToLinear();
+const SEAT_CEL = new THREE.Color(0x33a0da).convertSRGBToLinear(); // celeste Racing
+const SEAT_WHT = new THREE.Color(0xeef3f7).convertSRGBToLinear();
 const PITCH_XZ = new THREE.Vector2(PITCH.x, PITCH.z);
 function addStandShader(mat, striped) {
   mat.onBeforeCompile = (sh) => {
@@ -291,11 +293,16 @@ function addStandShader(mat, striped) {
       .replace('#include <common>',
         '#include <common>\nvarying vec3 vWPos;\nuniform float uStripes;uniform vec3 uCel;uniform vec3 uWht;uniform vec2 uPitchXZ;\nuniform float uActive;uniform float uActAng;uniform float uActHalf;uniform float uActYLo;uniform float uActYHi;uniform float uActPulse;')
       .replace('#include <emissivemap_fragment>',
-        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.4 + 0.18 * uActPulse);\n    }\n  }');
-    if (striped) {
-      sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
-        '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float s = (atan(dxz.y, dxz.x) + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;\n  }');
-    }
+        '#include <emissivemap_fragment>\n  if (uActive > 0.5) {\n    vec2 dpz = vWPos.xz - uPitchXZ;\n    float da = abs(atan(sin(atan(dpz.y, dpz.x) - uActAng), cos(atan(dpz.y, dpz.x) - uActAng)));\n    if (da < uActHalf && vWPos.y > uActYLo && vWPos.y < uActYHi) {\n      totalEmissiveRadiance += diffuseColor.rgb * (0.2 + 0.12 * uActPulse);\n    }\n  }');
+    // franjas (si corresponde) + FILETE divisorio negro en el límite exacto de
+    // cada sector (los límites están cada PI/4, corridos PI/8): separa bien
+    // plateas y populares, y coincide con el borde de la iluminación.
+    const stripeCode = striped
+      ? '\n    float s = (ang + 3.14159265) * uStripes / 6.28318531;\n    diffuseColor.rgb = fract(s) < 0.5 ? uCel : uWht;'
+      : '';
+    sh.fragmentShader = sh.fragmentShader.replace('#include <color_fragment>',
+      '#include <color_fragment>\n  {\n    vec2 dxz = vWPos.xz - uPitchXZ;\n    float ang = atan(dxz.y, dxz.x);' + stripeCode +
+      '\n    float mB = mod(ang - 0.39269908, 0.78539816);\n    float dB = min(mB, 0.78539816 - mB);\n    if (dB < 0.008) diffuseColor.rgb *= 0.3;\n  }');
     seatShaders.push(sh);
   };
   mat.needsUpdate = true;
@@ -314,16 +321,18 @@ gltfLoader.load(
       const mat = o.material;
       if (mat) {
         mat.side = THREE.FrontSide;
-        // butacas: los bloques celestes/blancos ORIGINALES del modelo, con el
-        // celeste oficial de Racing (#59B8E6); el shader sólo ilumina el sector
+        // butacas: franjas radiales celestes/blancas SIEMPRE (el patrón propio
+        // del modelo traía bloques enteros de un solo color — acá se rayan todos)
         if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY' || mat.name === 'BLK_STADIUM_SEATS_SECONDARY') {
-          if (mat.name === 'BLK_STADIUM_SEATS_PRIMARY') mat.color.setHex(0x59b8e6);
-          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, false); }
+          if (!mat.userData.glowed) { mat.userData.glowed = true; addStandShader(mat, true); }
         }
-        // las gradas pintadas del cuenco que quedaban LISAS (terrazas) sí llevan
-        // las franjas radiales, así no hay espacios todo blancos o todo celestes
-        if (/Continuous_Terraces/.test(o.name) &&
-            (mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE')) {
+        // TODA superficie lisa del cuenco (terrazas pintadas, paredones y las
+        // gradas de las medialunas) lleva las franjas radiales: no queda ninguna
+        // zona todo blanca o todo celeste. Los túneles quedan afuera.
+        const isBowlPaint =
+          ((mat.name === 'BLK_STADIUM_CONCRETE' || mat.name === 'BLK_STADIUM_TERR_STRIPE') && !/Tunnel/.test(o.name)) ||
+          (mat.name === 'BLK_FEATURE' && /Wall|Seating/.test(o.name));
+        if (isBowlPaint) {
           o.material = mat.clone();
           addStandShader(o.material, true);
         }
@@ -473,7 +482,7 @@ function pickSeat(clientX, clientY) {
   for (const h of hits) {
     const p = h.point;
     const r = Math.hypot(p.x - PITCH.x, p.z - PITCH.z);
-    if (r < 34 || r > 100 || p.y < 1.2 || p.y > 20) continue; // debe ser una tribuna (no techo)
+    if (r < 34 || r > 108 || p.y < 1.2 || p.y > 22) continue; // debe ser una tribuna (no techo)
     const angle = Math.atan2(p.z - PITCH.z, p.x - PITCH.x);
     const area = areaForSeat(p.x, p.z, p.y);
     // si tocaste el lugar de otro sector, te cambia a ese sector
